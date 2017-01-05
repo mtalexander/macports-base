@@ -86,6 +86,7 @@ foreach installed $ilist {
         # compute new name and location of archive
         set archivename "${iname}-${iversion}_${irevision}${ivariants}.${macports::os_platform}_${macports::os_major}.[join $archs -].${archivetype}"
         ui_msg "Processing ${counter} of ${installed_len}: ${archivename}"
+        ui_msg "    type ${installtype} at ${location}"
         if {$installtype eq "image"} {
             set targetdir [file dirname $location]
         } else {
@@ -97,14 +98,17 @@ foreach installed $ilist {
         file mkdir $targetdir
         set newlocation [file join $targetdir $archivename]
 
+        set processed 0
         if {$found} {
             file rename $oldarchivefullpath $newlocation
+            set processed 1
         } elseif {$installtype eq "image" && [file isdirectory $location]} {
             # create archive from image dir
             system -W $location "$tarcmd -cjf $newlocation * > ${targetdir}/error.log 2>&1"
             file delete -force ${targetdir}/error.log
-        } else {
-            # direct mode (or missing image dir), create archive from installed files
+            set processed 1
+        } elseif {$installtype ne "image"} {
+            # direct mode, create archive from installed files
             # we tell tar to read filenames from a file so as not to run afoul of command line length limits
             set fd [open ${targetdir}/tarlist w]
             foreach entry $contents {
@@ -113,6 +117,7 @@ foreach installed $ilist {
             close $fd
             system "$tarcmd -cjf $newlocation -T ${targetdir}/tarlist > ${targetdir}/error.log 2>&1"
             file delete -force ${targetdir}/tarlist ${targetdir}/error.log
+            set processed 1
         }
 
         lappend archived_list [list $installtype $iref $location $newlocation]
@@ -147,8 +152,8 @@ set counter 0
 foreach archived $archived_list {
     incr counter
     set location [lindex $archived 2]
-    ui_msg "Deleting ${counter} of ${archived_len}: ${location}"
     if {$location ne "" && [file isdirectory $location]} {
+        ui_msg "Deleting ${counter} of ${archived_len}: ${location}"
         if {[catch {file delete -force $location} result]} {
             ui_warn "Failed to delete ${location}: $result"
         }
