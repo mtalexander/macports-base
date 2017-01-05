@@ -1329,6 +1329,8 @@ proc target_run {ditem} {
         global ${target}.asroot
         if { [tbool ${target}.asroot] } {
             elevateToRoot $targetname
+        } else {
+            ui_debug "Root privileges not needed for $targetname ($portname)"
         }
 
         if {[ditem_contains $ditem init]} {
@@ -2962,7 +2964,7 @@ proc dropPrivileges {} {
             ui_error "Failed to de-escalate privileges."
         }
     } else {
-        ui_debug "Privilege de-escalation not attempted as not running as root."
+        ui_debug "Privilege de-escalation not attempted as not running as root [geteuid]:[getegid]."
     }
 }
 
