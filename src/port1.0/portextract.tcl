@@ -122,7 +122,8 @@ proc portextract::extract_start {args} {
 proc portextract::extract_main {args} {
     global UI_PREFIX filespath worksrcpath extract.dir use_dmg
 
-    if {![exists distfiles] && ![exists extract.only]} {
+    if {(![exists distfiles] || [option distfiles] eq "") && 
+        (![exists extract.only] || [option extract.only] eq "")} {
         # nothing to do
         return 0
     }
