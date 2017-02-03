@@ -374,7 +374,7 @@ AC_SUBST(VENDOR_TCLLIB_INSTALL)
 
 # Load tclConfig.sh from our private install of Tcl
 AC_MSG_CHECKING([for Tcl configuration])
-TCL_BIN_DIR=`(cd vendor/tcl${tcl_version}/unix; pwd)`
+TCL_BIN_DIR=`(cd vendor/tcl/unix; pwd)`
 AC_MSG_RESULT([found $TCL_BIN_DIR/tclConfig.sh])
 SC_LOAD_TCLCONFIG
 SC_ENABLE_SHARED

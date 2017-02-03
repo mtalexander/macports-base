@@ -10870,7 +10870,7 @@ VENDOR_TCLLIB_INSTALL="install-libraries"
 # Load tclConfig.sh from our private install of Tcl
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for Tcl configuration" >&5
 $as_echo_n "checking for Tcl configuration... " >&6; }
-TCL_BIN_DIR=`(cd vendor/tcl${tcl_version}/unix; pwd)`
+TCL_BIN_DIR=`(cd vendor/tcl/unix; pwd)`
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: found $TCL_BIN_DIR/tclConfig.sh" >&5
 $as_echo "found $TCL_BIN_DIR/tclConfig.sh" >&6; }
 
