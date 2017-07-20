@@ -1,20 +1,8 @@
 /* src/config.h.in.  Generated from configure.ac by autoheader.  */
 
-/* Define if using the Apple Foundation framework */
-#undef APPLE_FOUNDATION
-
-/* Define if using the Apple Objective-C runtime and compiler. */
-#undef APPLE_RUNTIME
-
 /* Absolute path to a directory used by darwintrace to copy SIP-protected
    files before executing */
 #undef DARWINTRACE_SIP_WORKAROUND_PATH
-
-/* Define if using the GNUstep Foundation library */
-#undef GNUSTEP_FOUNDATION
-
-/* Define if using the GNU Objective-C runtime and compiler. */
-#undef GNU_RUNTIME
 
 /* Define to 1 if you have the `bzero' function. */
 #undef HAVE_BZERO
@@ -30,6 +18,10 @@
 
 /* Define to 1 if you have the <crt_externs.h> header file. */
 #undef HAVE_CRT_EXTERNS_H
+
+/* Define to 1 if you have the declaration of
+   `atomic_compare_exchange_strong_explicit', and to 0 if you don't. */
+#undef HAVE_DECL_ATOMIC_COMPARE_EXCHANGE_STRONG_EXPLICIT
 
 /* Define to 1 if you have the declaration of `completion_matches', and to 0
    if you don't. */
@@ -129,9 +121,6 @@
 /* Define to 1 if you have the <ndir.h> header file, and it defines `DIR'. */
 #undef HAVE_NDIR_H
 
-/* Define to 1 if you have the <objc/objc.h> header file. */
-#undef HAVE_OBJC_OBJC_H
-
 /* Define to 1 if you have the <openssl/md5.h> header file. */
 #undef HAVE_OPENSSL_MD5_H
 
@@ -155,9 +144,6 @@
 
 /* Define to 1 if you have the `posix_spawn' function. */
 #undef HAVE_POSIX_SPAWN
-
-/* Define if you have POSIX threads libraries and header files. */
-#undef HAVE_PTHREAD
 
 /* Define to 1 if you have the <pwd.h> header file. */
 #undef HAVE_PWD_H
@@ -191,6 +177,9 @@
 
 /* Define to 1 if you have the <sqlite3ext.h> header file. */
 #undef HAVE_SQLITE3EXT_H
+
+/* Define to 1 if you have the <stdatomic.h> header file. */
+#undef HAVE_STDATOMIC_H
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #undef HAVE_STDINT_H
@@ -275,9 +264,6 @@
 /* Lowest non-system-reserved UID. */
 #undef MIN_USABLE_UID
 
-/* Mark private symbols */
-#undef MP_PRIVATE
-
 /* Define to the address where bug reports for this package should be sent. */
 #undef PACKAGE_BUGREPORT
 
@@ -295,10 +281,6 @@
 
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
-
-/* Define to necessary symbol if this constant uses a non-standard name on
-   your system. */
-#undef PTHREAD_CREATE_JOINABLE
 
 /* Define to 1 if readlink does not conform with POSIX 1003.1a (where third
    argument is a size_t and return value is a ssize_t) */

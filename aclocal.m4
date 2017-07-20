@@ -1,6 +1,4 @@
 builtin(include,m4/tcl.m4)
-builtin(include,m4/pthread.m4)
-builtin(include,m4/foundation.m4)
 
 dnl Search for a variable in a list. Run ACTION-IF-FOUND if it is in the list,
 dnl ACTION-IF-NOT-FOUND otherwise.
@@ -336,7 +334,7 @@ AC_DEFUN(MP_CHECK_FRAMEWORK_COREFOUNDATION, [
 		AC_DEFINE([HAVE_FRAMEWORK_COREFOUNDATION], [], [Define if CoreFoundation framework is available])
 	fi
 
-	AC_SUBST(HAVE_FRAMEWORK_COREFOUNDATION)
+	AC_SUBST(HAVE_FRAMEWORK_COREFOUNDATION, [$mp_cv_have_framework_corefoundation])
 ])
 
 
@@ -450,7 +448,7 @@ AC_DEFUN(MP_CHECK_FRAMEWORK_SYSTEMCONFIGURATION, [
 		AC_DEFINE([HAVE_FRAMEWORK_SYSTEMCONFIGURATION], [], [Define if SystemConfiguration framework is available])
 	fi
 
-	AC_SUBST(HAVE_FRAMEWORK_SYSTEMCONFIGURATION)
+	AC_SUBST(HAVE_FRAMEWORK_SYSTEMCONFIGURATION, [$mp_cv_have_framework_systemconfiguration])
 ])
 
 
@@ -507,7 +505,7 @@ AC_DEFUN(MP_CHECK_FRAMEWORK_IOKIT, [
 		AC_DEFINE([HAVE_FRAMEWORK_IOKIT], [], [Define if IOKit framework is available])
 	fi
 
-	AC_SUBST(HAVE_FRAMEWORK_IOKIT)
+	AC_SUBST(HAVE_FRAMEWORK_IOKIT, [$mp_cv_have_framework_iokit])
 ])
 
 

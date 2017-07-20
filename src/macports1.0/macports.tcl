@@ -1087,7 +1087,7 @@ match macports.conf.default."
     # set the hidden flag on $portdbpath to avoid spotlight indexing, which
     # might slow builds down considerably. You can avoid this by touching
     # $portdbpath/.nohide.
-    if {$os_platform eq "darwin" && [vercmp [info tclversion] 8.5] >= 0 && ![file exists [file join $portdbpath .nohide]] && [file writable $portdbpath] && [file attributes $portdbpath -hidden] == 0} {
+    if {$os_platform eq "darwin" && ![file exists [file join $portdbpath .nohide]] && [file writable $portdbpath] && [file attributes $portdbpath -hidden] == 0} {
         try -pass_signal {
             file attributes $portdbpath -hidden yes
         } catch {{*} eCode eMessage} {
@@ -1131,8 +1131,7 @@ match macports.conf.default."
         }
     }
 
-    if {[getuid] == 0 && $os_major >= 11 && $os_platform eq "darwin" &&
-            [file isfile "${macports::user_home}/Library/Preferences/com.apple.dt.Xcode.plist"]} {
+    if {[getuid] == 0 && $os_major >= 11 && $os_platform eq "darwin"} {
         macports::copy_xcode_plist $env(HOME)
     }
 
