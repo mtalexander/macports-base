@@ -4,8 +4,7 @@ SHELL			= @SHELL@
 
 CC			= @CC@
 CFLAGS			= @CFLAGS@ -std=c99 $(CFLAGS_QUICHEEATERS) $(CFLAGS_PEDANTIC) $(CFLAGS_WERROR)
-OBJCFLAGS		= @OBJCFLAGS@ $(CFLAGS_QUICHEEATERS) $(CFLAGS_PEDANTIC) $(CFLAGS_WERROR)
-CPPFLAGS		= @CPPFLAGS@ @DEFS@ -I@abs_top_builddir@/src -I@abs_top_srcdir@/src -I. -I@abs_top_builddir@/@VENDOR_DESTROOT@/@TCL_PREFIX@/include
+CPPFLAGS		= @CPPFLAGS@ @DEFS@ -I@abs_top_builddir@/src -I@abs_top_srcdir@/src -I. -I@abs_top_builddir@/@VENDOR_DESTROOT@@TCL_PREFIX@/include
 CFLAGS_QUICHEEATERS	= @CFLAGS_QUICHEEATERS@
 CFLAGS_PEDANTIC		= @CFLAGS_PEDANTIC@
 CFLAGS_WERROR		= @CFLAGS_WERROR@
@@ -57,8 +56,12 @@ localstatedir		= @localstatedir@
 infodir			= @infodir@
 
 mpconfigdir		= @MPCONFIGDIR@
-portsdir		= @PORTSDIR@
 
 MACPORTS_VERSION	= @MACPORTS_VERSION@
 
 SILENT			= @
+
+HAVE_GETDELIM		= @HAVE_GETDELIM@
+HAVE_GETLINE		= @HAVE_GETLINE@
+HAVE_STRLCAT		= @HAVE_STRLCAT@
+HAVE_STRLCPY		= @HAVE_STRLCPY@

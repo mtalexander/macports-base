@@ -387,7 +387,7 @@ test getoption {
 
 
 test setxcodeinfo {
-    Set XCode info unit test.
+    Set Xcode info unit test.
 } -constraints {
     root
 } -setup {
@@ -399,8 +399,8 @@ test setxcodeinfo {
     if {![info exists macports::xcodeversion]} {
        return "FAIL: xcodeversion unset"
     }
-    return "Set XCode version successful."
-} -result "Set XCode version successful."
+    return "Set Xcode version successful."
+} -result "Set Xcode version successful."
 
 
 test set_developer_dir {
@@ -957,9 +957,8 @@ test get_pingtime {
 } -setup {
     set time [expr [clock seconds] - 86300]
     set macports::ping_cache(macports.org) [list MacPorts $time]
-    set macports::host_blacklisted(macports_blacklist) [list black $time]
-    set macports::host_preferred(macports_pref) [list pref $time]
-
+    set macports::host_blacklist macports_blacklist
+    set macports::preferred_hosts macports_pref
 } -body {
     if {[macports::get_pingtime macports.org] ne "MacPorts"} {
        return "FAIL: wrong ping time"

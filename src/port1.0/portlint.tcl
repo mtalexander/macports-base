@@ -227,8 +227,8 @@ proc portlint::lint_main {args} {
             set require_blank true
             set require_after "PortSystem"
         }
-        if {[string match "PortGroup*" $line]} {
-            regexp {PortGroup\s+([A-Za-z0-9_]+)\s+([0-9.]+)} $line -> portgroup portgroupversion
+        if {[string match "*PortGroup*" $line]} {
+            regexp {^\s*PortGroup\s+([A-Za-z0-9_]+)\s+([0-9.]+)} $line -> portgroup portgroupversion
             if {![info exists portgroup]} {
                 ui_error "Line $lineno has unrecognized PortGroup"
                 incr errors
@@ -343,7 +343,8 @@ proc portlint::lint_main {args} {
     global os.platform os.arch os.version version revision epoch \
            description long_description platforms categories all_variants \
            maintainers license homepage master_sites checksums patchfiles \
-           depends_fetch depends_extract depends_lib depends_build depends_run \
+           depends_fetch depends_extract depends_patch \
+           depends_lib depends_build depends_run \
            depends_test distfiles fetch.type lint_portsystem lint_platforms \
            lint_required lint_optional replaced_by conflicts
     set portarch [get_canonical_archs]
@@ -426,15 +427,6 @@ proc portlint::lint_main {args} {
         }
     }
 
-    if {![string is wideinteger -strict $epoch]} {
-        ui_error "Port epoch is not numeric: $epoch"
-        incr errors
-    }
-    if {![string is wideinteger -strict $revision]} {
-        ui_error "Port revision is not numeric: $revision"
-        incr errors
-    }
-
     set variantnumber 1
     foreach variant $all_variants {
         set variantname [ditem_key $variant name] 
@@ -446,8 +438,8 @@ proc portlint::lint_main {args} {
             set name_ok true
             set desc_ok true
 
-            if {![regexp {^[A-Za-z0-9_]+$} $variantname]} {
-                ui_error "Variant name $variantname is not valid; use \[A-Za-z0-9_\]+ only"
+            if {![regexp {^[A-Za-z0-9_.]+$} $variantname]} {
+                ui_error "Variant name $variantname is not valid; use \[A-Za-z0-9_.\]+ only"
                 incr errors
                 set name_ok false
             }
@@ -502,6 +494,9 @@ proc portlint::lint_main {args} {
     if {[info exists depends_extract]} {
         lappend all_depends {*}$depends_extract
     }
+    if {[info exists depends_patch]} {
+        lappend all_depends {*}$depends_patch
+    }
     if {[info exists depends_lib]} {
         lappend all_depends {*}$depends_lib
     }
@@ -529,7 +524,7 @@ proc portlint::lint_main {args} {
     }
 
     # Check for multiple dependencies
-    foreach deptype {depends_extract depends_lib depends_build depends_run depends_test} {
+    foreach deptype {depends_extract depends_patch depends_lib depends_build depends_run depends_test} {
         if {[info exists $deptype]} {
             array set depwarned {}
             foreach depspec [set $deptype] {

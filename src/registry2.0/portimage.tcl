@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # portimage.tcl
 #
-# Copyright (c) 2004-2005, 2007-2011, 2014 The MacPorts Project
+# Copyright (c) 2004-2005, 2007-2018 The MacPorts Project
 # Copyright (c) 2004 Will Barton <wbb4@opendarwin.org>
 # Copyright (c) 2002 Apple Inc.
 # All rights reserved.
@@ -88,6 +88,10 @@ proc activate {name {version ""} {revision ""} {variants 0} {optionslist ""}} {
     if {[info exists options(ports_activate_no-exec)]} {
         set noexec $options(ports_activate_no-exec)
     }
+    set rename_list {}
+    if {[info exists options(portactivate_rename_files)]} {
+        set rename_list $options(portactivate_rename_files)
+    }
     if {![info exists registry_open]} {
         registry::open [::file join ${macports::registry.path} registry registry.db]
         set registry_open yes
@@ -132,7 +136,7 @@ proc activate {name {version ""} {revision ""} {variants 0} {optionslist ""}} {
 
     ui_msg "$UI_PREFIX [format [msgcat::mc "Activating %s @%s"] $name $specifier]"
 
-    _activate_contents $requested
+    _activate_contents $requested $rename_list
 }
 
 # takes a composite version spec rather than separate version,revision,variants
@@ -346,46 +350,58 @@ proc extract_archive_to_tmpdir {location} {
                 }
             }
             t(ar|bz|lz|xz|gz) {
-                set tar "tar"
-                if {[catch {set tar [macports::findBinary $tar ${macports::autoconf::tar_path}]} errmsg] == 0} {
+                global macports::hfscompression
+                # Opportunistic HFS compression. bsdtar will automatically
+                # disable this if filesystem does not support compression.
+                # Have to be root due to <https://trac.macports.org/ticket/56563>.
+                if {${macports::hfscompression} && [getuid] == 0 &&
+                        ![catch {macports::binaryInPath bsdtar}] &&
+                        ![catch {exec bsdtar -x --hfsCompression < /dev/null >& /dev/null}]} {
+                    ui_debug "Using bsdtar with HFS+ compression (if valid)"
+                    set unarchive.cmd "bsdtar"
+                    set unarchive.pre_args {-xvp --hfsCompression -f}
+                } else {
+                    set tar "tar"
+                    if {[catch {set tar [macports::findBinary $tar ${macports::autoconf::tar_path}]} errmsg]} {
+                        ui_debug $errmsg
+                        throw MACPORTS "No '$tar' was found on this system!"
+                    }
                     ui_debug "Using $tar"
                     set unarchive.cmd "$tar"
                     set unarchive.pre_args {-xvpf}
-                    if {[regexp {z2?$} ${unarchive.type}]} {
-                        set unarchive.args {-}
-                        if {[regexp {bz2?$} ${unarchive.type}]} {
-                            if {![catch {macports::binaryInPath lbzip2}]} {
-                                set gzip "lbzip2"
-                            } elseif {![catch {macports::binaryInPath pbzip2}]} {
-                                set gzip "pbzip2"
-                            } else {
-                                set gzip "bzip2"
-                            }
-                        } elseif {[regexp {lz$} ${unarchive.type}]} {
-                            set gzip "lzma"
-                        } elseif {[regexp {xz$} ${unarchive.type}]} {
-                            set gzip "xz"
+                }
+
+                if {[regexp {z2?$} ${unarchive.type}]} {
+                    set unarchive.args {-}
+                    if {[regexp {bz2?$} ${unarchive.type}]} {
+                        if {![catch {macports::binaryInPath lbzip2}]} {
+                            set gzip "lbzip2"
+                        } elseif {![catch {macports::binaryInPath pbzip2}]} {
+                            set gzip "pbzip2"
                         } else {
-                            set gzip "gzip"
+                            set gzip "bzip2"
                         }
-                        if {[info exists macports::autoconf::${gzip}_path]} {
-                            set hint [set macports::autoconf::${gzip}_path]
-                        } else {
-                            set hint ""
-                        }
-                        if {[catch {set gzip [macports::findBinary $gzip $hint]} errmsg] == 0} {
-                            ui_debug "Using $gzip"
-                            set unarchive.pipe_cmd "$gzip -d -c ${location} |"
-                        } else {
-                            ui_debug $errmsg
-                            throw MACPORTS "No '$gzip' was found on this system!"
-                        }
+                    } elseif {[regexp {lz$} ${unarchive.type}]} {
+                        set gzip "lzma"
+                    } elseif {[regexp {xz$} ${unarchive.type}]} {
+                        set gzip "xz"
                     } else {
-                        set unarchive.args "${location}"
+                        set gzip "gzip"
+                    }
+                    if {[info exists macports::autoconf::${gzip}_path]} {
+                        set hint [set macports::autoconf::${gzip}_path]
+                    } else {
+                        set hint ""
+                    }
+                    if {[catch {set gzip [macports::findBinary $gzip $hint]} errmsg] == 0} {
+                        ui_debug "Using $gzip"
+                        set unarchive.pipe_cmd "$gzip -d -c ${location} |"
+                    } else {
+                        ui_debug $errmsg
+                        throw MACPORTS "No '$gzip' was found on this system!"
                     }
                 } else {
-                    ui_debug $errmsg
-                    throw MACPORTS "No '$tar' was found on this system!"
+                    set unarchive.args "${location}"
                 }
             }
             xar {
@@ -439,7 +455,7 @@ proc extract_archive_to_tmpdir {location} {
 }
 
 ## Activates the contents of a port
-proc _activate_contents {port {imagefiles {}} {location {}}} {
+proc _activate_contents {port {rename_list {}}} {
     variable force
     variable noexec
 
@@ -543,6 +559,15 @@ proc _activate_contents {port {imagefiles {}} {location {}}} {
         # We don't have to do this as mentioned above, but it makes the
         # debug output of activate make more sense.
         set files [lsort -increasing -unique $files]
+        # handle files that are to be renamed
+        set confirmed_rename_list {}
+        foreach {src dest} $rename_list {
+            set index [lsearch -exact -sorted $files $src]
+            if {$index != -1} {
+                set files [lreplace $files $index $index]
+                lappend confirmed_rename_list $src $dest
+            }
+        }
         set rollback_filelist {}
 
         registry::write {
@@ -552,6 +577,13 @@ proc _activate_contents {port {imagefiles {}} {location {}}} {
                 foreach file $files {
                     if {[_activate_file "${extracted_dir}${file}" $file] == 1} {
                         lappend rollback_filelist $file
+                    }
+                }
+                foreach {src dest} $confirmed_rename_list {
+                    $port deactivate [list $src]
+                    $port activate [list $src] [list $dest]
+                    if {[_activate_file ${extracted_dir}${src} $dest] == 1} {
+                        lappend rollback_filelist $dest
                     }
                 }
 
@@ -668,7 +700,7 @@ proc _deactivate_contents {port imagefiles {force 0} {rollback 0}} {
             # match and activate will say that some file exists but doesn't
             # belong to any port.
             # The custom realpath proc is necessary because file normalize
-            # does not resolve symlinks on OS X < 10.6
+            # does not resolve symlinks on Mac OS X < 10.6
             set directory [realpath [::file dirname $file]]
             lappend files [::file join $directory [::file tail $file]]
 

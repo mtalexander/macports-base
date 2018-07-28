@@ -98,7 +98,7 @@ dnl
 dnl Parameters: Similar to AC_ARG_VAR ($2 gets some boiler plate around it)
 AC_DEFUN([MP_TOOL_PATH], [dnl
 	AC_ARG_WITH([m4_tolower($1)], [AS_HELP_STRING([--with-m4_tolower($1)=PATH],
-			[Path to alternate $2 command])], [$1=$withval],dnl
+			[path to alternate $2 command])], [$1=$withval],dnl
 		[])dnl
 ])
 
@@ -508,52 +508,11 @@ AC_DEFUN(MP_CHECK_FRAMEWORK_IOKIT, [
 	AC_SUBST(HAVE_FRAMEWORK_IOKIT, [$mp_cv_have_framework_iokit])
 ])
 
-
-dnl This macro checks if the user specified a ports tree
-dnl explicitly. If not, search for it
-
-# MP_PATH_PORTSDIR(DEFAULT_PORTSDIR)
-#---------------------------------------
- AC_DEFUN([MP_PATH_PORTSDIR],[
- 	dnl For ease of reading, run after gcc has been found/configured
- 	AC_REQUIRE([AC_PROG_CC])
-
- 	AC_ARG_WITH(ports-dir, [AS_HELP_STRING([--with-ports-dir=DIR],[Specify alternate ports directory])], [ portsdir="$withval" ] )
-
-
- 	AC_MSG_CHECKING([for ports tree])
- 	if test "x$portsdir" != "x" ; then
- 	  if test -d "$portsdir" -a -e "$portsdir/PortIndex" ; then
- 		:
- 	  else
- 		AC_MSG_ERROR([$portsdir not a valid ports tree])
- 	  fi
- 	else
- 		dnl If the user didn't give a path, look for default
- 		if test "x$1" != "x" ; then
- 		  if test -d "$1" -a -e "$1/PortIndex" ; then
- 			portsdir=$1
- 		  fi
- 		fi
- 	fi
-
- 	if test "x$portsdir" != "x" ; then
- 		AC_MSG_RESULT($portsdir)
- 		PORTSDIR="$portsdir"
- 		AC_SUBST(PORTSDIR)
- 	else
- 		AC_MSG_WARN([No ports tree found])
- 	fi
-
-         ])
-
-
 # MP_PATH_MPCONFIGDIR
 #---------------------------------------
 AC_DEFUN([MP_PATH_MPCONFIGDIR],[
 	dnl if the user actually specified --prefix, shift
 	dnl mpconfigdir to $prefix/etc/macports
-	dnl 	AC_REQUIRE([MP_PATH_PORTSDIR])
 	
         AC_MSG_CHECKING([for MacPorts config directory])
 
@@ -584,12 +543,12 @@ AC_DEFUN([MP_CHECK_OLDLAYOUT],[
 # MP_CHECK_NOROOTPRIVILEGES
 #-------------------------------------------------
 AC_DEFUN([MP_CHECK_NOROOTPRIVILEGES],[
-	dnl if with user specifies --with-no-root-privileges,
+	dnl if the user specifies --with-no-root-privileges,
 	dnl use current user and group.
 	dnl use ~/Library/Tcl as Tcl package directory
 	AC_REQUIRE([MP_PATH_MPCONFIGDIR])
 
-	AC_ARG_WITH(no-root-privileges, [AS_HELP_STRING([--with-no-root-privileges],[Specify that MacPorts should be installed in your home directory])], [ROOTPRIVS=$withval] )
+	AC_ARG_WITH(no-root-privileges, [AS_HELP_STRING([--with-no-root-privileges],[specify that MacPorts should be installed in your home directory])], [ROOTPRIVS=$withval] )
 
 	if test "${ROOTPRIVS+set}" = set; then
 		# Set install-user to current user
@@ -616,11 +575,11 @@ AC_DEFUN([MP_CHECK_NOROOTPRIVILEGES],[
 # MP_CHECK_RUNUSER
 #-------------------------------------------------
 AC_DEFUN([MP_CHECK_RUNUSER],[
-	dnl if with user specifies --with-macports-user,
-	dnl use it. otherwise default to platform defaults
+	dnl if the user specifies --with-macports-user,
+	dnl use it, otherwise default to platform defaults
 	AC_REQUIRE([MP_PATH_MPCONFIGDIR])
 
-	AC_ARG_WITH(macports-user, [AS_HELP_STRING([--with-macports-user=USER],[Specify user to drop privileges to, if possible, during compiles etc.])], [ RUNUSR=$withval ] )
+	AC_ARG_WITH(macports-user, [AS_HELP_STRING([--with-macports-user=USER],[specify user to drop privileges to, if possible, during compiles, etc.])], [ RUNUSR=$withval ] )
 	
 	AC_MSG_CHECKING([for macports user])
 	if test "x$RUNUSR" = "x" ; then
@@ -635,11 +594,11 @@ AC_DEFUN([MP_CHECK_RUNUSER],[
 # MP_SHARED_DIRECTORY
 #-------------------------------------------------
 AC_DEFUN([MP_SHARED_DIRECTORY],[
-	dnl if with user specifies --with-shared-directory,
+	dnl if the user specifies --with-shared-directory,
 	dnl use 0775 permissions for ${prefix} directories
 	AC_REQUIRE([MP_PATH_MPCONFIGDIR])
 
-	AC_ARG_WITH(shared-directory, [AS_HELP_STRING([--with-shared-directory],[Use 0775 permissions for installed directories])], [ SHAREDIR=$withval ] )
+	AC_ARG_WITH(shared-directory, [AS_HELP_STRING([--with-shared-directory],[use 0775 permissions for installed directories])], [ SHAREDIR=$withval ] )
 
 	if test "${SHAREDIR+set}" = set; then	
 		AC_MSG_CHECKING([whether to share the install directory with all members of the install group])
@@ -653,11 +612,11 @@ AC_DEFUN([MP_SHARED_DIRECTORY],[
 # MP_CHECK_INSTALLUSER
 #-------------------------------------------------
 AC_DEFUN([MP_CHECK_INSTALLUSER],[
-	dnl if with user specifies --with-install-user,
-	dnl use it. otherwise default to platform defaults
+	dnl if the user specifies --with-install-user,
+	dnl use it, otherwise default to platform defaults
 	AC_REQUIRE([MP_PATH_MPCONFIGDIR])
 
-	AC_ARG_WITH(install-user, [AS_HELP_STRING([--with-install-user=USER],[Specify user ownership of installed files])], [ DSTUSR=$withval ] )
+	AC_ARG_WITH(install-user, [AS_HELP_STRING([--with-install-user=USER],[specify user ownership of installed files])], [ DSTUSR=$withval ] )
 	
 	AC_MSG_CHECKING([for install user])
 	if test "x$DSTUSR" = "x" ; then
@@ -671,11 +630,11 @@ AC_DEFUN([MP_CHECK_INSTALLUSER],[
 # MP_CHECK_INSTALLGROUP
 #-------------------------------------------------
 AC_DEFUN([MP_CHECK_INSTALLGROUP],[
-	dnl if with user specifies --with-install-group,
-	dnl use it. otherwise default to platform defaults
+	dnl if the user specifies --with-install-group,
+	dnl use it, otherwise default to platform defaults
 	AC_REQUIRE([MP_CHECK_INSTALLUSER])
 
-	AC_ARG_WITH(install-group, [AS_HELP_STRING([--with-install-group=GROUP],[Specify group ownership of installed files])], [ DSTGRP=$withval ] )
+	AC_ARG_WITH(install-group, [AS_HELP_STRING([--with-install-group=GROUP],[specify group ownership of installed files])], [ DSTGRP=$withval ] )
 
 	AC_MSG_CHECKING([for install group])
 	if test "x$DSTGRP" = "x" ; then
@@ -702,12 +661,12 @@ AC_DEFUN([MP_CHECK_INSTALLGROUP],[
 # MP_DIRECTORY_MODE
 #-------------------------------------------------
 AC_DEFUN([MP_DIRECTORY_MODE],[
-	dnl if with user specifies --with-directory-mode,
-	dnl use the specified permissions for ${prefix} directories
+	dnl if the user specifies --with-directory-mode,
+	dnl use the specified permissions for ${prefix} directories,
 	dnl otherwise use 0755
 	AC_REQUIRE([MP_PATH_MPCONFIGDIR])
 
-	AC_ARG_WITH(directory-mode, [AS_HELP_STRING([--with-directory-mode=MODE],[Specify directory mode of installed directories])], [ DSTMODE=$withval ] )
+	AC_ARG_WITH(directory-mode, [AS_HELP_STRING([--with-directory-mode=MODE],[specify directory mode of installed directories])], [ DSTMODE=$withval ] )
 	
 	AC_MSG_CHECKING([what permissions to use for installation directories])
 	if test "x$DSTMODE" = "x" ; then
@@ -723,7 +682,7 @@ AC_DEFUN([MP_DIRECTORY_MODE],[
 AC_DEFUN([MP_PATH_APPLICATIONS],[
 	AC_REQUIRE([MP_CHECK_INSTALLUSER])
 
-	AC_ARG_WITH(applications-dir,[AS_HELP_STRING([--with-applications-dir],[Applications installation directory.])], MPAPPLICATIONSDIR=${withval})
+	AC_ARG_WITH(applications-dir,[AS_HELP_STRING([--with-applications-dir],[applications installation directory])], MPAPPLICATIONSDIR=${withval})
 
 	oldprefix=$prefix
 	if test "x$prefix" = "xNONE" ; then
@@ -749,7 +708,7 @@ AC_DEFUN([MP_PATH_APPLICATIONS],[
 AC_DEFUN([MP_PATH_FRAMEWORKS],[
 	AC_REQUIRE([MP_CHECK_INSTALLUSER])
 
-	AC_ARG_WITH(frameworks-dir,[AS_HELP_STRING([--with-frameworks-dir],[Frameworks installation directory.])], MPFRAMEWORKSDIR=${withval})
+	AC_ARG_WITH(frameworks-dir,[AS_HELP_STRING([--with-frameworks-dir],[frameworks installation directory])], MPFRAMEWORKSDIR=${withval})
 
 	oldprefix=$prefix
 	if test "x$prefix" = "xNONE" ; then
@@ -766,15 +725,38 @@ AC_DEFUN([MP_PATH_FRAMEWORKS],[
 	prefix=$oldprefix
 ])
 
+# MP_CHECK_STARTUPITEMS
+#-------------------------------------------------
+AC_DEFUN([MP_CHECK_STARTUPITEMS],[
+	dnl if the user specifies --without-startupitems,
+	dnl set "startupitem_install no" in macports.conf
+	AC_ARG_WITH(startupitems, [AS_HELP_STRING([--without-startupitems],[set "startupitem_install no" in macports.conf])], [with_startupitems=$withval], [with_startupitems=yes] )
+
+	AC_MSG_CHECKING([for startupitem_install])
+
+	if test "x$with_startupitems" != "xno" ; then
+		startupitem_install="#startupitem_install	yes"
+	else
+		startupitem_install="startupitem_install	no"
+	fi
+
+	AC_MSG_RESULT([$with_startupitems])
+	AC_SUBST(startupitem_install)
+])
+
+
 # MP_UNIVERSAL_OPTIONS
 #---------------------------------------
 AC_DEFUN([MP_UNIVERSAL_OPTIONS],[
-	AC_ARG_WITH(universal-archs,[AS_HELP_STRING([--with-universal-archs="CPU"],[Universal CPU architectures (space separated)])], UNIVERSAL_ARCHS=${withval})
+	AC_ARG_WITH(universal-archs,[AS_HELP_STRING([--with-universal-archs="CPU"],[universal CPU architectures (space separated)])], UNIVERSAL_ARCHS=${withval})
 
 	if test "x$UNIVERSAL_ARCHS" = "x"; then
 		case "$MACOSX_VERSION" in
-			10.1[[0-9]]*)
+			10.1[[0-3]]*)
 				UNIVERSAL_ARCHS="x86_64 i386"
+			;;
+			10.1[[4-9]]*)
+				UNIVERSAL_ARCHS="x86_64"
 			;;
 			10.[[0-5]]*)
 				UNIVERSAL_ARCHS="i386 ppc"
@@ -875,7 +857,7 @@ AC_DEFUN([MP_PROG_DAEMONDO],[
 #---------------------------------------
 AC_DEFUN([MP_LIBCURL_FLAGS],[
 	AC_ARG_WITH(curlprefix,
-		   [  --with-curlprefix       base directory for the cURL install '/usr', '/usr/local',...],
+		   [  --with-curlprefix       base directory for the curl install ('/usr', '/usr/local', ...)],
 		   [  curlprefix=$withval ])
 
 	if test "x$curlprefix" = "x"; then
@@ -919,7 +901,7 @@ AC_DEFUN([MP_LIBCURL_FLAGS],[
 AC_DEFUN([MP_SQLITE3_FLAGS],[
     # first sqlite3 itself
 	AC_ARG_WITH(sqlite3prefix,
-		   [  --with-sqlite3prefix       base directory for the sqlite3 install '/usr', '/usr/local',...],
+		   [  --with-sqlite3prefix    base directory for the sqlite3 install ('/usr', '/usr/local', ...)],
 		   [  sqlite3prefix=$withval ])
 
 	if test "x$sqlite3prefix" = "x"; then
@@ -975,7 +957,7 @@ dnl items.
 AC_DEFUN([MP_FLAGS_SCAN],[
 	AC_ARG_ENABLE(
 		[flag-sanitization],
-		AS_HELP_STRING([--disable-flag-sanitization], [Do not sanitize CPPFLAGS, CFLAGS, OBJCFLAGS and LDFLAGS]),
+		AS_HELP_STRING([--disable-flag-sanitization], [do not sanitize CPPFLAGS, CFLAGS, OBJCFLAGS and LDFLAGS]),
 		[disable_mp_flags_scan=yes],
 		[disable_mp_flags_scan=no])
 
@@ -1083,34 +1065,6 @@ AC_DEFUN([MP_PATH_SCAN],[
 	prefix=$oldprefix
 ])
 
-dnl This macro tests for sed support of -E (BSD) or -r (GNU)
-AC_DEFUN([MP_SED_EXTENDED_REGEXP],[
-	AC_PATH_PROG(SED, [sed])
-
-	if test "x$SED" = "x"; then
-		AC_MSG_ERROR([cannot find sed. Is sed installed?])
-	fi
-
-	AC_MSG_CHECKING([which sed flag to use for extended regexp])
-	[any_sed_flag=`echo foo | $SED    -e s/foo+/OK/ 2>&1 | grep OK`]
-	[bsd_sed_flag=`echo foo | $SED -E -e s/foo+/OK/ 2>&1 | grep OK`]
-	[gnu_sed_flag=`echo foo | $SED -r -e s/foo+/OK/ 2>&1 | grep OK`]
-	if test "x$any_sed_flag" = "xOK" ; then
-		AC_MSG_RESULT([none])
-		SED_EXT=
-	elif test "x$bsd_sed_flag" = "xOK" ; then
-		AC_MSG_RESULT([-E (BSD)])
-		SED_EXT=-E
-	elif test "x$gnu_sed_flag" = "xOK" ; then
-		AC_MSG_RESULT([-r (GNU)])
-		SED_EXT=-r
-	else
-		AC_MSG_RESULT([not available])
-		SED_EXT='N/A'
-	fi
-	AC_SUBST(SED_EXT)
-])
-
 dnl This macro tests for tar support of -q (BSD) or not (GNU)
 AC_DEFUN([MP_TAR_FAST_READ],[
 	AC_PATH_PROG(TAR, [tar])
@@ -1163,55 +1117,6 @@ AC_DEFUN([MP_PATCH_GNU_VERSION],[
 ])
 
 #------------------------------------------------------------------------
-# MP_CHECK_READLINK_IS_P1003_1A --
-#
-#	Check if readlink conforms to POSIX 1003.1a standard, define
-#	READLINK_IS_NOT_P1003_1A if it doesn't.
-#
-# Arguments:
-#       None.
-#
-# Requires:
-#       None.
-#
-# Depends:
-#		AC_LANG_PROGRAM
-#
-# Results:
-#       Result is cached.
-#
-#	If readlink doesn't conform to POSIX 1003.1a, defines the following variables:
-#		READLINK_IS_NOT_P1003_1A
-#
-#------------------------------------------------------------------------
-AC_DEFUN(MP_CHECK_READLINK_IS_P1003_1A, [
-	AC_MSG_CHECKING([if readlink conforms to POSIX 1003.1a])
-
-	AC_CACHE_VAL(mp_cv_readlink_is_posix_1003_1a, [
-		AC_COMPILE_IFELSE([
-			AC_LANG_PROGRAM([
-					#include <unistd.h>
-					ssize_t readlink(const char *, char *, size_t);
-				], [
-			])
-			], [
-				mp_cv_readlink_is_posix_1003_1a="yes"
-			], [
-				mp_cv_readlink_is_posix_1003_1a="no"
-			]
-		)
-	])
-
-	AC_MSG_RESULT(${mp_cv_readlink_is_posix_1003_1a})
-
-	if test x"${mp_cv_readlink_is_posix_1003_1a}" = "xno"; then
-		AC_DEFINE([READLINK_IS_NOT_P1003_1A], [], [Define to 1 if readlink does not conform with POSIX 1003.1a (where third argument is a size_t and return value is a ssize_t)])
-	fi
-
-	AC_SUBST(READLINK_IS_NOT_P1003_1A)
-])
-
-#------------------------------------------------------------------------
 # MP_WERROR --
 #
 #       Enable -Werror
@@ -1230,7 +1135,7 @@ AC_DEFUN(MP_CHECK_READLINK_IS_P1003_1A, [
 #------------------------------------------------------------------------
 AC_DEFUN([MP_WERROR],[
 	AC_REQUIRE([AC_PROG_CC])
-	AC_ARG_ENABLE(werror, AS_HELP_STRING([--enable-werror],[Add -Werror to CFLAGS. Used for development.]), [enable_werror=${enableval}], [enable_werror=no])
+	AC_ARG_ENABLE(werror, AS_HELP_STRING([--enable-werror],[add -Werror to CFLAGS (used for development)]), [enable_werror=${enableval}], [enable_werror=no])
 	if test x"$enable_werror" != "xno"; then
 		CFLAGS_WERROR="-Werror"
 	else
@@ -1346,7 +1251,7 @@ AC_DEFUN([MP_PLATFORM],[
 #       none.
 #
 # Requires:
-#       OS_PLATOFRM and OS_MAJOR from MP_PLATFORM.
+#       OS_PLATFORM and OS_MAJOR from MP_PLATFORM.
 #
 # Depends:
 #       none.

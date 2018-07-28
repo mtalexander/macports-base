@@ -3,7 +3,7 @@
 # Copyright (c) 2002-2003 Apple Inc.
 # Copyright (c) 2004 Robert Shaw <rshaw@opendarwin.org>
 # Copyright (c) 2006-2007 Markus W. Weissmann <mww@macports.org>
-# Copyright (c) 2004-2016 The MacPorts Project
+# Copyright (c) 2004-2018 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -472,7 +472,7 @@ proc default {option val} {
     if {[info exists option_defaults($option)]} {
         ui_debug "Re-registering default for $option"
         # remove the old trace
-        trace vdelete $option rwu default_check
+        trace remove variable $option {read write unset} default_check
     } else {
         # If option is already set and we did not set it
         # do not reset the value
@@ -482,7 +482,7 @@ proc default {option val} {
     }
     set option_defaults($option) $val
     set $option $val
-    trace variable $option rwu default_check
+    trace add variable $option {read write unset} default_check
 }
 
 # default_check
@@ -491,19 +491,19 @@ proc default {option val} {
 proc default_check {optionName index op} {
     global option_defaults $optionName
     switch $op {
-        w {
+        write {
             unset option_defaults($optionName)
-            trace vdelete $optionName rwu default_check
+            trace remove variable $optionName {read write unset} default_check
             return
         }
-        r {
+        read {
             upvar $optionName option
             uplevel #0 set $optionName $option_defaults($optionName)
             return
         }
-        u {
+        unset {
             unset option_defaults($optionName)
-            trace vdelete $optionName rwu default_check
+            trace remove variable $optionName {read write unset} default_check
             return
         }
     }
@@ -590,7 +590,7 @@ proc variant {args} {
     }
     ditem_key $ditem name "[join [ditem_key $ditem provides] -]"
 
-    if {![regexp {^[A-Za-z0-9_]+$} [ditem_key $ditem provides]]} {
+    if {![regexp {^[A-Za-z0-9_.]+$} [ditem_key $ditem provides]]} {
         set name [ditem_key $ditem provides] 
         ditem_delete $ditem
         return -code error "Variant name $name contains invalid characters"
@@ -983,11 +983,7 @@ proc reinplace {args}  {
         set cmdline {}
         lappend cmdline $portutil::autoconf::sed_command
         if {$extended} {
-            if {$portutil::autoconf::sed_ext_flag eq "N/A"} {
-                ui_debug "sed extended regexp not available"
-                return -code error "reinplace sed(1) too old"
-            }
-            lappend cmdline $portutil::autoconf::sed_ext_flag
+            lappend cmdline -E
         }
         if {$suppress} {
             lappend cmdline -n
@@ -1164,11 +1160,12 @@ proc move {args} {
         set arg [string range [lindex $args 0] 1 end]
         set args [lreplace $args 0 0]
         switch -- $arg {
-            force {append options -$arg}
+            force {lappend options -$arg}
             - break
             default {return -code error "move: illegal option -- $arg"}
         }
     }
+    lappend options --
     if {[llength $args] == 2} {
         set oldname [lindex $args 0]
         set newname [lindex $args 1]
@@ -1176,13 +1173,13 @@ proc move {args} {
             # case-only rename
             set tempdir [mkdtemp ${oldname}-XXXXXXXX]
             set tempname $tempdir/[file tail $oldname]
-            file rename $options -- $oldname $tempname
-            file rename $options -- $tempname $newname
+            file rename {*}$options $oldname $tempname
+            file rename {*}$options $tempname $newname
             delete $tempdir
             return
         }
     }
-    file rename {*}$options -- {*}$args
+    file rename {*}$options {*}$args
 }
 
 # ln
@@ -1307,7 +1304,7 @@ set ports_dry_last_skipped ""
 proc target_run {ditem} {
     global target_state_fd workpath portpath ports_trace PortInfo ports_dryrun \
            ports_dry_last_skipped worksrcpath subport env portdbpath \
-           macosx_version
+           macosx_version prefix
     set portname $subport
     set result 0
     set skipped 0
@@ -1410,18 +1407,18 @@ proc target_run {ditem} {
                     switch $target {
                         fetch       -
                         checksum    { set deptypes "depends_fetch" }
-                        extract     -
-                        patch       { set deptypes "depends_fetch depends_extract" }
+                        extract     { set deptypes "depends_fetch depends_extract" }
+                        patch       { set deptypes "depends_fetch depends_extract depends_patch" }
                         configure   -
-                        build       { set deptypes "depends_fetch depends_extract depends_lib depends_build" }
-                        test        { set deptypes "depends_fetch depends_extract depends_lib depends_build depends_run depends_test" }
+                        build       { set deptypes "depends_fetch depends_extract depends_patch depends_lib depends_build" }
+                        test        { set deptypes "depends_fetch depends_extract depends_patch depends_lib depends_build depends_run depends_test" }
                         destroot    -
                         dmg         -
                         pkg         -
                         portpkg     -
                         mpkg        -
                         mdmg        -
-                        ""          { set deptypes "depends_fetch depends_extract depends_lib depends_build depends_run" }
+                        ""          { set deptypes "depends_fetch depends_extract depends_patch depends_lib depends_build depends_run" }
 
                         # install may be run given an archive, which means
                         # depends_fetch, _extract, _build dependencies have
@@ -1452,9 +1449,11 @@ proc target_run {ditem} {
                         }
                     }
 
-                    # Add ccache port for access to ${prefix}/bin/ccache binary
-                    if {[option configure.ccache]} {
-                        lappend deplist ccache
+                    # Add ccache port for access to ${prefix}/bin/ccache binary if it exists
+                    if {[option configure.ccache] && [file exists ${prefix}/bin/ccache]} {
+                        set name [_get_dep_port path:bin/ccache:ccache]
+                        lappend deplist $name
+                        set deplist [recursive_collect_deps $name $deplist]
                     }
 
                     ui_debug "Tracemode will respect recursively collected port dependencies: [lsort $deplist]"
@@ -2226,7 +2225,7 @@ proc handle_default_variants {option action {value ""}} {
             }
             array set vinfo $PortInfo(vinfo)
             foreach v $value {
-                if {[regexp {([-+])([-A-Za-z0-9_]+)} $v whole val variant]} {
+                if {[regexp {([-+])([-A-Za-z0-9_.]+)} $v whole val variant]} {
                     # Retrieve the information associated with this variant.
                     if {![info exists vinfo($variant)]} {
                         set vinfo($variant) {}
@@ -2309,7 +2308,7 @@ proc adduser {name args} {
         try {
             exec -ignorestderr $dscl . -create /Users/${name} UniqueID ${uid}
 
-            # These are implicitly added on Mac OSX Lion.  AuthenticationAuthority
+            # These are implicitly added on Mac OS X Lion.  AuthenticationAuthority
             # causes the user to be visible in the Users & Groups Preference Pane,
             # and the others are just noise, so delete them.
             # https://trac.macports.org/ticket/30168
@@ -2334,7 +2333,7 @@ proc adduser {name args} {
             set failed? 1
         } catch {{CHILDSTATUS *} eCode eMessage} {
             foreach {- pid code} $eCode {
-                ui_error "dscl($pid) termined with an exit status of $code"
+                ui_error "dscl($pid) terminated with an exit status of $code"
                 ui_debug "dscl printed: $eMessage"
             }
             
@@ -2432,7 +2431,7 @@ proc addgroup {name args} {
             set failed? 1
         } catch {{CHILDSTATUS *} eCode eMessage} {
             foreach {- pid code} $eCode {
-                ui_error "dscl($pid) termined with an exit status of $code"
+                ui_error "dscl($pid) terminated with an exit status of $code"
                 ui_debug "dscl printed: $eMessage"
             }
             
@@ -2513,12 +2512,11 @@ proc set_ui_prefix {} {
 proc PortGroup {group version} {
     global porturl PortInfo _portgroup_search_dirs
 
-    lappend PortInfo(portgroups) [list $group $version]
-
     if {[info exists _portgroup_search_dirs]} {
         foreach dir $_portgroup_search_dirs {
             set groupFile ${dir}/${group}-${version}.tcl
             if {[file exists $groupFile]} {
+                lappend PortInfo(portgroups) [list $group $version $groupFile]
                 uplevel "source $groupFile"
                 ui_debug "Sourcing PortGroup $group $version from $groupFile"
                 return
@@ -2529,9 +2527,11 @@ proc PortGroup {group version} {
     set groupFile [getportresourcepath $porturl "port1.0/group/${group}-${version}.tcl"]
 
     if {[file exists $groupFile]} {
+        lappend PortInfo(portgroups) [list $group $version $groupFile]
         uplevel "source $groupFile"
         ui_debug "Sourcing PortGroup $group $version from $groupFile"
     } else {
+        lappend PortInfo(portgroups) [list $group $version ""]
         ui_warn "PortGroup ${group} ${version} could not be located. ${group}-${version}.tcl does not exist."
     }
 }
@@ -2540,7 +2540,7 @@ proc PortGroup {group version} {
 proc get_portimage_name {} {
     global subport version revision portvariants os.platform os.major portarchivetype
     set ret "${subport}-${version}_${revision}${portvariants}.${os.platform}_${os.major}.[join [get_canonical_archs] -].${portarchivetype}"
-    # should really look up NAME_MAX here, but it's 255 for all OS X so far
+    # should really look up NAME_MAX here, but it's 255 for all macOS so far
     # (leave 10 chars for an extension like .rmd160 on the sig file)
     if {[string length $ret] > 245 && ${portvariants} ne ""} {
         # try hashing the variants
@@ -2717,6 +2717,7 @@ proc extract_archive_metadata {archive_location archive_type metadata_type} {
     }
     if {$metadata_type eq "contents"} {
         set contents {}
+        set binary_info {}
         set ignore 0
         set sep [file separator]
         foreach line [split $raw_contents \n] {
@@ -2728,9 +2729,11 @@ proc extract_archive_metadata {archive_location archive_type metadata_type} {
                 lappend contents "${sep}${line}"
             } elseif {$line eq "@ignore"} {
                 set ignore 1
+            } elseif {[string range $line 0 15] eq "@comment binary:"} {
+                lappend binary_info [lindex $contents end] [string range $line 16 end]
             }
         }
-        return $contents
+        return [list $contents $binary_info]
     } elseif {$metadata_type eq "portname"} {
         foreach line [split $raw_contents \n] {
             if {[lindex $line 0] eq "@portname"} {
@@ -2738,6 +2741,23 @@ proc extract_archive_metadata {archive_location archive_type metadata_type} {
             }
         }
         return ""
+    } elseif {$metadata_type eq "cxx_info"} {
+        set val_cxx_stdlib ""
+        set val_cxx_stdlib_overridden ""
+        foreach line [split $raw_contents \n] {
+            if {[lindex $line 0] eq "@cxx_stdlib"} {
+                set val_cxx_stdlib [lindex $line 1]
+                if {$val_cxx_stdlib_overridden ne ""} {
+                    break
+                }
+            } elseif {[lindex $line 0] eq "@cxx_stdlib_overridden"} {
+                set val_cxx_stdlib_overridden [lindex $line 1]
+                if {$val_cxx_stdlib ne ""} {
+                    break
+                }
+            }
+        }
+        return [list $val_cxx_stdlib $val_cxx_stdlib_overridden]
     } else {
         return -code error "unknown metadata_type: $metadata_type"
     }
@@ -2857,7 +2877,7 @@ proc quotemeta {str} {
 }
 
 ##
-# Recusively chown the given file or directory to the specified user.
+# Recursively chown the given file or directory to the specified user.
 #
 # @param path the file/directory to be chowned
 # @param user the user to chown file to
@@ -2873,7 +2893,7 @@ proc chown {path user} {
 }
 
 ##
-# Recusively chown the given file or directory to $macportsuser, using root privileges.
+# Recursively chown the given file or directory to $macportsuser, using root privileges.
 #
 # @param path the file/directory to be chowned
 proc chownAsRoot {path} {
@@ -2975,6 +2995,38 @@ proc validate_macportsuser {} {
         ui_warn "configured user/group $macportsuser does not exist, will build as root"
         set macportsuser "root"
     }
+}
+
+# run code as a specified user
+proc exec_as_uid {uid code} {
+    global macportsuser
+    set oldeuid [geteuid]
+    if {$oldeuid != $uid} {
+        if {$oldeuid != 0} {
+            elevateToRoot "exec_as_uid"
+        }
+        if {$uid != 0} {
+            setegid [uname_to_gid [uid_to_name $uid]]
+            seteuid $uid
+            ui_debug "dropping privileges: euid changed to [geteuid], egid changed to [getegid]."
+        }
+    }
+
+    set retcode ok
+    if {[catch {uplevel 1 $code} result]} {
+        set retcode error
+    }
+
+    if {$oldeuid != $uid} {
+        if {$uid != 0} {
+            elevateToRoot "exec_as_uid"
+        }
+        if {$oldeuid != 0} {
+            dropPrivileges
+        }
+    }
+
+    return -code $retcode $result
 }
 
 # dependency analysis helpers
@@ -3189,12 +3241,22 @@ proc _check_xcode_version {} {
             10.12 {
                 set min 8.0
                 set ok 8.0
-                set rec 8.2.1
+                set rec 9.2
+            }
+            10.13 {
+                set min 9.0
+                set ok 9.0
+                set rec 9.3
+            }
+            10.14 {
+                set min 10.0
+                set ok 10.0
+                set rec 10.0
             }
             default {
-                set min 8.0
-                set ok 8.0
-                set rec 8.2.1
+                set min 10.0
+                set ok 10.0
+                set rec 10.0
             }
         }
         if {$xcodeversion eq "none"} {
@@ -3203,10 +3265,10 @@ proc _check_xcode_version {} {
                 ui_warn "You downloaded Xcode from the Mac App Store but didn't install it. Run \"Install Xcode\" in the /Applications folder."
             }
         } elseif {[vercmp $xcodeversion $min] < 0} {
-            ui_error "The installed version of Xcode (${xcodeversion}) is too old to use on the installed OS version. Version $rec or later is recommended on Mac OS X ${macosx_version}."
+            ui_error "The installed version of Xcode (${xcodeversion}) is too old to use on the installed OS version. Version $rec or later is recommended on macOS ${macosx_version}."
             return 1
         } elseif {[vercmp $xcodeversion $ok] < 0} {
-            ui_warn "The installed version of Xcode (${xcodeversion}) is known to cause problems. Version $rec or later is recommended on Mac OS X ${macosx_version}."
+            ui_warn "The installed version of Xcode (${xcodeversion}) is known to cause problems. Version $rec or later is recommended on macOS ${macosx_version}."
         }
 
         # Xcode 4.3 and above requires the command-line utilities package to be installed. 
@@ -3221,8 +3283,7 @@ proc _check_xcode_version {} {
             }
 
             # Check whether /usr/include and /usr/bin/make exist and tell users to install the command line tools, if they don't
-            if {   ![file isdirectory [file join $cltpath usr include]]
-                || ![file executable  [file join $cltpath usr bin make]]} {
+            if {[vercmp $xcodeversion 9.3] < 0 && (![file isdirectory [file join $cltpath usr include]] || ![file executable  [file join $cltpath usr bin make]])} {
                 ui_warn "System headers do not appear to be installed. Most ports should build correctly, but if you experience problems due to a port depending on system headers, please file a ticket at https://trac.macports.org."
                 if {[vercmp $macosx_version 10.9] >= 0} {
                     ui_warn "You can install them as part of the Xcode Command Line Tools package by running `xcode-select --install'."

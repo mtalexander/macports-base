@@ -1,8 +1,8 @@
 /*
  * Copyright (c) 2005 Apple Inc. All rights reserved.
  * Copyright (c) 2005-2006 Paul Guyot <pguyot@kallisys.net>,
+ * Copyright (c) 2006-2018 The MacPorts Project
  * All rights reserved.
- * Copyright (c) 2006-2015 The MacPorts Project
  *
  * @APPLE_BSD_LICENSE_HEADER_START@
  *
@@ -65,24 +65,6 @@
 #define STATSYSNUM SYS_stat
 #define LSTATSYSNUM SYS_lstat
 #endif
-
-#ifndef HAVE_STRLCPY
-/* Define strlcpy if it's not available. */
-size_t strlcpy(char *dst, const char *src, size_t size) {
-	size_t result = strlen(src);
-	if (size > 0) {
-		size_t copylen = size - 1;
-		if (copylen > result) {
-			copylen = result;
-		}
-		memcpy(dst, src, copylen);
-		dst[copylen] = 0;
-	}
-	return result;
-}
-#endif
-
-#include "../pextlib1.0/strlcat.c"
 
 // Global Variables
 /**
@@ -403,7 +385,7 @@ void __darwintrace_setup() {
 		}
 
 		/* Set the close-on-exec flag as early as possible after the socket
-		 * creation. On OS X, there is no way to do this race-condition free
+		 * creation. On macOS, there is no way to do this race-condition free
 		 * unless you synchronize around creation and fork(2) -- however,
 		 * blocking in this function is not acceptable for darwintrace, because
 		 * it could possibly run in a signal handler, leading to a deadlock.
@@ -541,7 +523,7 @@ static void frecv(void *restrict buf, size_t size) {
 	 * SA_RESTART isn't set) and fread(3) may return short without giving us
 	 * a way to know how many bytes have actually been read, i.e. without a way
 	 * to do the call again. Because of this great API design and
-	 * implementation on OS X, we'll just use read(2) here. */
+	 * implementation on macOS, we'll just use read(2) here. */
 	int fd = fileno(__darwintrace_sock());
 	size_t count = 0;
 	while (count < size) {
@@ -576,7 +558,7 @@ static void fsend(const void *restrict buf, size_t size) {
 	 * SA_RESTART isn't set) and fwrite(3) may return short without giving us
 	 * a way to know how many bytes have actually been written, i.e. without
 	 * a way to do the call again. Because of this great API design and
-	 * implementation on OS X, we'll just use write(2) here. */
+	 * implementation on macOS, we'll just use write(2) here. */
 	int fd = fileno(__darwintrace_sock());
 	size_t count = 0;
 	while (count < size) {

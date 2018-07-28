@@ -1,5 +1,5 @@
 '\" t
-.TH "PORT\-RECLAIM" "1" "2017\-02\-17" "MacPorts 2\&.4\&.99" "MacPorts Manual"
+.TH "PORT\-RECLAIM" "1" "2\&.5\&.99" "MacPorts 2\&.5\&.99" "MacPorts Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -24,7 +24,7 @@ port-reclaim \- Reclaims disk space\&.
 .SH "SYNOPSIS"
 .sp
 .nf
-\fBport\fR [\fB\-vd\fR] \fBreclaim\fR
+\fBport\fR [\fB\-vdNy\fR] \fBreclaim\fR
     [\-\-enable\-reminders] [\-\-disable\-reminders]
 .fi
 .SH "DESCRIPTION"
@@ -46,6 +46,16 @@ Disable reminders to run
 .SH "GLOBAL OPTIONS"
 .sp
 Please see the section \fBGLOBAL OPTIONS\fR in the \fBport\fR(1) man page for a description of global port options\&.
+.PP
+\fB\-N\fR
+.RS 4
+Non\-interactive mode, uninstall ports and remove distfiles without asking for confirmation\&.
+.RE
+.PP
+\fB\-y\fR
+.RS 4
+Perform a dry run\&. No ports will be uninstalled and distfiles will not be removed from disk, even if confirmed by the user\&.
+.RE
 .SH "SEE ALSO"
 .sp
 \fBport\fR(1), \fBport-uninstall\fR(1), \fBport-clean\fR(1),

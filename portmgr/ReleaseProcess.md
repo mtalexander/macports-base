@@ -76,6 +76,18 @@ code:
 *   Update the autoconf [`configure`][configure] script through the provided
     [`autogen.sh`][autogen.sh] script once the version number in `mp_version`
     has been changed, since the former reads the latter.
+*   Regenerate all man pages from scratch to ensure the new version number is
+    used in the output file. AsciiDoc and DocBook either need to be installed
+    in the target prefix or manually pass the correct paths if they are
+    installed elsewhere.
+
+        ./autogen.sh
+        ./standard_configure.sh
+        make -C doc/ clean all \
+            ASCIIDOC=/opt/local/bin/asciidoc \
+            XSLTPROC=/opt/local/bin/xsltproc \
+            DOCBOOK_XSL=/opt/local/share/xsl/docbook-xsl-nons/manpages/docbook.xsl
+
 *   Make sure that these and any other changes or bug fixes are made on and/or
     merged between the release branch and master as needed. For instance, if
     you've made changes to `ChangeLog` only on the release branch, those
@@ -142,7 +154,7 @@ done with the help of the infrastructure team.
 
 ### Create Release Packages and Disk Image(s) ###
 
-The dmg is a Mac OS X disk image that contains a standalone installer,
+The dmg is a macOS disk image that contains a standalone installer,
 configured in the usual way, named in a consistent fashion and incorporating
 the OS version for which it was built.
 
@@ -185,7 +197,7 @@ automated through a Makefile target or similar. A good way of validating the
 installer is to first create the destroot of the port and examine it for:
 
 *   Linking: libraries and binaries should not be linked against anything
-    that's not present by default on a vanilla Mac OS X installation +
+    that's not present by default on a vanilla macOS installation +
     developer tools, excluding even the MacPorts installation prefix; this can
     be accomplished through the use of `otool -L`. Currently the libraries and
     binaries in need of linking validation are:
@@ -219,7 +231,7 @@ and that the pkg contained therein properly starts up Installer.app when it's
 double-clicked.
 
 
-## Create Release on GitHub ##
+### Create Release on GitHub ###
 
 All of our distfiles should also be available as downloads from a new GitHub
 release. Create a new release matching the previously created tag on GitHub
@@ -232,7 +244,35 @@ In order to make the release version available through selfupdate, the
 [`config/RELEASE_URL`][RELEASE_URL] file in the base repository needs to be
 updated with the tag of the release to distribute. This file is read by the
 cron job that makes the code available via rsync. See
-[`jobs/mprsyncup`][mprsyncup] in the macports-infra repository.
+[`jobs/mprsyncup`][mprsyncup] in the macports-infrastructure repository.
+
+
+### Make the Release Available for Pull Request Checks on Travis CI ###
+
+To make the new release available for testing pull requests on
+[Travis CI](https://travis-ci.org/macports), update the travis-ci branch by
+merging the newly tagged release into it.
+
+    $ git checkout travis-ci
+    $ git merge v2.0.0
+    $ git push origin travis-ci
+
+Verify that the new release has been built and deployed successfully on
+[Travis CI](https://travis-ci.org/macports/macports-base/branches).
+
+
+### Add Release Version to Trac ###
+
+Add the new version to the list of released versions on Trac. Edit the list
+using the [web admin interface](https://trac.macports.org/admin/ticket/versions)
+on our Trac installation.
+
+
+### Verify That the Public Rsync Server Has Updated ###
+
+Verify that the MacPorts version on the public rsync server has been updated:
+
+    $ curl -s http://nue.de.rsync.macports.org/macports/release/base/config/macports_version
 
 
 ### Notify the Public of the Release ###

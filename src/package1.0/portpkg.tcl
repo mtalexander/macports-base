@@ -1,8 +1,8 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
 # portpkg.tcl
 #
-# Copyright (c) 2005, 2007 - 2013, 2016 The MacPorts Project
-# Copyright (c) 2002 - 2003 Apple Inc.
+# Copyright (c) 2005, 2007-2014, 2016-2018 The MacPorts Project
+# Copyright (c) 2002-2003 Apple Inc.
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -214,7 +214,7 @@ proc portpkg::package_pkg {portname portepoch portversion portrevision} {
         write_info_plist ${pkgpath}/Contents/Info.plist $portname $portversion $portrevision
 
         system "[findBinary mkbom $portutil::autoconf::mkbom_path] ${destpath} ${pkgpath}/Contents/Archive.bom"
-        system "cd ${destpath} && [findBinary pax $portutil::autoconf::pax_path] -x cpio -w -z . > ${pkgpath}/Contents/Archive.pax.gz"
+        system -W ${destpath} "[findBinary pax $portutil::autoconf::pax_path] -x cpio -w -z . > ${pkgpath}/Contents/Archive.pax.gz"
 
         write_description_plist ${pkgpath}/Contents/Resources/Description.plist $portname $portversion $description
         write_sizes_file ${pkgpath}/Contents/Resources/Archive.sizes ${pkgpath} ${destpath}
@@ -351,7 +351,7 @@ proc portpkg::write_welcome_html {filename portname portversion portrevision lon
     <title>Install ${portname}</title>
 </head>
 <body>
-<font face=\"Helvetica\"><b>Welcome to the ${portname} for Mac OS X Installer</b></font>
+<font face=\"Helvetica\"><b>Welcome to the ${portname} for macOS Installer</b></font>
 <p>
 <font face=\"Helvetica\">${long_description}</font>
 <p>"
@@ -360,7 +360,7 @@ proc portpkg::write_welcome_html {filename portname portversion portrevision lon
         puts $fd "<font face=\"Helvetica\"><a href=\"${homepage}\">${homepage}</a></font><p>"
     }
 
-    puts $fd "<font face=\"Helvetica\">This installer guides you through the steps necessary to install ${portname} ${portversion}${portrevision_str} for Mac OS X. To get started, click Continue.</font>
+    puts $fd "<font face=\"Helvetica\">This installer guides you through the steps necessary to install ${portname} ${portversion}${portrevision_str} for macOS. To get started, click Continue.</font>
 </body>
 </html>"
 
@@ -458,7 +458,7 @@ proc portpkg::write_distribution {dfile portname portversion portrevision} {
 # [1] https://developer.apple.com/library/mac/#documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html#//apple_ref/doc/uid/TP40009249-SW1
 # [2] https://developer.apple.com/library/mac/#documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html#//apple_ref/doc/uid/TP40009249-SW1
 # [3] https://groups.google.com/d/msg/munki-dev/-DCERUz6rrM/zMbY6iimIGwJ
-# [4] http://lists.macosforge.org/pipermail/macports-dev/2013-January/021477.html
+# [4] https://lists.macports.org/pipermail/macports-dev/2013-January/021477.html
 proc portpkg::mp_version_to_apple_version {portepoch portversion portrevision} {
     # Assume that portepoch and portrevision are non-negative integers
     # so they do not need to be specially handled like the upstream

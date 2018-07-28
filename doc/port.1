@@ -1,5 +1,5 @@
 '\" t
-.TH "PORT" "1" "2017\-06\-29" "MacPorts 2\&.4\&.99" "MacPorts Manual"
+.TH "PORT" "1" "2\&.5\&.99" "MacPorts 2\&.5\&.99" "MacPorts Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -24,7 +24,7 @@ port \- Command line interface for MacPorts
 .SH "SYNOPSIS"
 .sp
 .nf
-\fBport\fR [\fB\-bcdfknNopqRstuvy\fR] [\fB\-D\fR \fIportdir\fR] [\fB\-F\fR \fIcmdfile\fR] [\fIaction\fR] [\fIactionflags\fR]
+\fBport\fR [\fB\-bcdfknNopqRstuvy\fR] [\fB\-D\fR \fIportdir\fR|\fIportname\fR] [\fB\-F\fR \fIcmdfile\fR] [\fIaction\fR] [\fIactionflags\fR]
      [[\fIportname\fR | \fIpseudo\-portname\fR | \fIport\-expressions\fR | \fIport\-url\fR]]
      [[\fI@version\fR] [+/\-variant \&...] \&... [option=value \&...]]
 .fi
@@ -526,7 +526,7 @@ Honor state files even if the Portfile was modified\&. This flag is called \-o b
 .PP
 \-t
 .RS 4
-Enable trace mode debug facilities on platforms that support it, currently only Mac OS X\&.
+Enable trace mode debug facilities on platforms that support it, currently only macOS\&.
 
 This feature is two\-folded\&. It consists in automatically detecting and reporting undeclared dependencies based on what files the port reads or what programs the port executes\&. In verbose mode, it will also report unused dependencies for each stage of the port installation\&. It also consists in forbidding and reporting file creation and file writes outside allowed directories (temporary directories and ${workpath})\&.
 .RE
@@ -538,10 +538,9 @@ This feature is two\-folded\&. It consists in automatically detecting and report
 Force mode, ignore state file
 .RE
 .PP
-\-D \fIportdir\fR
+\-D \fIportdir\fR|\fIportname\fR
 .RS 4
-Specfiy
-\fIportdir\fR
+Specify a directory to which the port command should change to before processing any actions\&. If the specified value does not contain any slashes, the value is used to look up a port and the current working directory is set to the corresponding port directory\&.
 .RE
 .PP
 \-F \fIcmdfile\fR
@@ -672,6 +671,11 @@ port uninstall \-\-follow\-dependents python27
 .if n \{\
 .RE
 .\}
+.RE
+.PP
+reclaim
+.RS 4
+Reclaims disk space by uninstalling inactive ports and removing unneeded installation files\&.
 .RE
 .PP
 select
@@ -1254,26 +1258,26 @@ There are also actions for producing installable packages of ports:
 .PP
 pkg
 .RS 4
-Creates an OS X installer package of
+Creates a macOS installer package of
 \fIportname\fR\&.
 .RE
 .PP
 mpkg
 .RS 4
-Creates an OS X installer metapackage of
+Creates a macOS installer metapackage of
 \fIportname\fR
 and its dependencies\&.
 .RE
 .PP
 dmg
 .RS 4
-Creates an internet\-enabled disk image containing an OS X package of
+Creates an Internet\-enabled disk image containing a macOS package of
 \fIportname\fR\&.
 .RE
 .PP
 mdmg
 .RS 4
-Creates an internet\-enabled disk image containing an OS X metapackage of
+Creates an Internet\-enabled disk image containing a macOS metapackage of
 \fIportname\fR
 and its dependencies\&.
 .RE
@@ -1326,7 +1330,7 @@ The \fBport\fR utility exits 0 on success, and >0 if an error occurs\&.
 .\}
 .nf
 (C) 2002\-2003 Apple Inc\&.
-(C) 2004\-2012 The MacPorts Project
+(C) 2004\-2018 The MacPorts Project
 Landon Fuller <landonf@macports\&.org>
 James Berry <jberry@macports\&.org>
 Jordan K\&. Hubbard <jkh@macports\&.org>

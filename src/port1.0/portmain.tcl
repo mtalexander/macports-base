@@ -1,8 +1,8 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
 # portmain.tcl
 #
-# Copyright (c) 2004 - 2005, 2007 - 2012 The MacPorts Project
-# Copyright (c) 2002 - 2003 Apple Inc.
+# Copyright (c) 2004-2005, 2007-2018 The MacPorts Project
+# Copyright (c) 2002-2003 Apple Inc.
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -58,12 +58,21 @@ options prefix name version revision epoch categories maintainers \
         compiler.cpath compiler.library_path \
         add_users
 
+proc portmain::check_option_integer {option action args} {
+    if {$action eq "set" && ![string is wideinteger -strict $args]} {
+        return -code error "$option must be an integer"
+    }
+}
+
 # Order of option_proc and option_export matters. Filter before exporting.
 
 # Assign option procedure to default_variants
 option_proc default_variants handle_default_variants
 # Handle notes special for better formatting
 option_proc notes handle_option_string
+# Ensure that revision and epoch are integers
+option_proc epoch portmain::check_option_integer
+option_proc revision portmain::check_option_integer
 
 # Export options via PortInfo
 options_export name version revision epoch categories maintainers platforms description long_description notes homepage license provides conflicts replaced_by installs_libs license_noconflict patchfiles
@@ -113,6 +122,7 @@ default install.group {${portutil::autoconf::install_group}}
 
 # Platform Settings
 default os.platform {$os_platform}
+default os.subplatform {$os_subplatform}
 default os.version {$os_version}
 default os.major {$os_major}
 default os.minor {$os_minor}
@@ -121,24 +131,16 @@ default os.endian {$os_endian}
 
 set macosx_version_text {}
 if {[option os.platform] eq "darwin"} {
-    set macosx_version_text "(Mac OS X ${macosx_version}) "
+    set macosx_version_text "(macOS ${macosx_version}) "
 }
 ui_debug "OS [option os.platform]/[option os.version] ${macosx_version_text}arch [option os.arch]"
 
 default universal_variant {${use_configure}}
 
-# sub-platforms of darwin
-if {[option os.platform] eq "darwin"} {
-    if {[file isdirectory /System/Library/Frameworks/Carbon.framework]} {
-        default os.subplatform macosx
-        # we're on Mac OS X and can therefore build universal
-        default os.universal_supported yes
-    } else {
-        default os.subplatform puredarwin
-        default os.universal_supported no
-    }
+if {[option os.platform] eq "darwin" && [option os.subplatform] eq "macosx"} {
+    # we're on macOS and can therefore build universal
+    default os.universal_supported yes
 } else {
-    default os.subplatform {}
     default os.universal_supported no
 }
 

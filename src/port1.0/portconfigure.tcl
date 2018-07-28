@@ -56,7 +56,7 @@ options configure.cxx \
 
 default configure.cxx                   {[portconfigure::configure_get_compiler cxx]}
 default configure.cxx_archflags         {[portconfigure::configure_get_archflags cxx]}
-default configure.cxx_stdlib            {$cxx_stdlib}
+default configure.cxx_stdlib            {[portconfigure::configure_get_cxx_stdlib]}
 default configure.cxxflags \
         {[portconfigure::construct_cxxflags ${configure.optflags}]}
 default configure.objcxx                {[portconfigure::configure_get_compiler objcxx]}
@@ -76,9 +76,16 @@ proc portconfigure::should_add_stdlib {} {
     set is_clang [string match *clang* [option configure.cxx]]
     return [expr {$has_stdlib && $is_clang}]
 }
+proc portconfigure::should_add_cxx_abi {} {
+    set is_oldos [expr {[option os.platform] eq "darwin" && [option os.major] < 10}]
+    set is_mp_gcc [regexp {(^|/)g\+\+-mp-.*} [option configure.cxx]]
+    return [expr {$is_oldos && $is_mp_gcc}]
+}
 proc portconfigure::construct_cxxflags {flags} {
     if {[portconfigure::should_add_stdlib]} {
         lappend flags -stdlib=[option configure.cxx_stdlib]
+    } elseif {[portconfigure::should_add_cxx_abi]} {
+        lappend flags -D_GLIBCXX_USE_CXX11_ABI=0
     }
     return $flags
 }
@@ -90,6 +97,14 @@ proc portconfigure::stdlib_trace {opt action args} {
         $opt-append -stdlib=[option configure.cxx_stdlib]
     }
     return
+}
+proc portconfigure::configure_get_cxx_stdlib {} {
+    global cxx_stdlib configure.cxx
+    if {![regexp {(^|/)g\+\+-mp-.*} ${configure.cxx}]} {
+        return $cxx_stdlib
+    } else {
+        return macports-libstdc++
+    }
 }
 
 # ********** END C++ / OBJECTIVE-C++ **********
@@ -419,14 +434,17 @@ proc portconfigure::configure_get_sdkroot {sdk_version} {
         return $sdk
     }
 
-    if {![catch {set sdk [exec xcrun --sdk macosx --show-sdk-path 2> /dev/null]}]} {
-        ui_warn "Unable to determine location of the macOS ${sdk_version} SDK.  Using the default macOS SDK."
-        return $sdk
-    }
+    # TODO: Support falling back to "macosx" if it is present?
+    #       This leads to problems when it is newer than the base OS because many OSS assume that
+    #       the SDK version matches the deployment target, so they unconditionally try to use
+    #       symbols that are only available on newer OS versions..
+    #if {![catch {set sdk [exec xcrun --sdk macosx --show-sdk-path 2> /dev/null]}]} {
+    #    ui_warn "Unable to determine location of the macOS ${sdk_version} SDK.  Using the default macOS SDK."
+    #    return $sdk
+    #}
 
-    ui_warn "Unable to determine location of a macOS SDK.  Compilation will likely fail."
-
-    return {}
+    ui_error "Unable to determine location of a macOS SDK."
+    return -code error "Unable to determine location of a macOS SDK."
 }
 
 # internal function to determine the "-arch xy" flags for the compiler
@@ -505,7 +523,9 @@ proc portconfigure::configure_get_default_compiler {} {
 
 # internal function to choose compiler fallback list based on platform
 proc portconfigure::get_compiler_fallback {} {
-    global xcodeversion macosx_deployment_target default_compilers configure.sdkroot configure.cxx_stdlib os.major
+    global xcodeversion macosx_deployment_target default_compilers \
+           configure.sdkroot configure.cxx_stdlib cxx_stdlib os.major \
+           option_defaults
 
     # Check our override
     if {[info exists default_compilers]} {
@@ -519,14 +539,32 @@ proc portconfigure::get_compiler_fallback {} {
 
     # Legacy cases
     if {[vercmp $xcodeversion 4.0] < 0} {
+        set canonical_archs [get_canonical_archs]
         if {[vercmp $xcodeversion 3.2] >= 0} {
             if {[string match *10.4u* ${configure.sdkroot}]} {
                 return {gcc-4.0}
             }
+            # No return here. 3.2.x with newer SDKs than 10.4u is handled below.
         } elseif {[vercmp $xcodeversion 3.0] >= 0} {
-            return {gcc-4.2 apple-gcc-4.2 gcc-4.0 macports-clang-3.4 macports-clang-3.3}
+            if {"ppc" in $canonical_archs || "ppc64" in $canonical_archs} {
+                return {gcc-4.2 apple-gcc-4.2 gcc-4.0 macports-gcc-6 macports-gcc-7}
+            } else {
+                return {gcc-4.2 apple-gcc-4.2 gcc-4.0 macports-clang-3.4 macports-clang-3.3}
+            }
         } else {
-            return {apple-gcc-4.2 gcc-4.0 gcc-3.3 macports-clang-3.3}
+            # Xcode 2.x (Tiger)
+            if {"ppc" in $canonical_archs || "ppc64" in $canonical_archs} {
+                if {"i386" in $canonical_archs} {
+                    # universal
+                    return {apple-gcc-4.2 gcc-4.0 macports-gcc-6 macports-gcc-7}
+                } else {
+                    # ppc only
+                    return {apple-gcc-4.2 gcc-4.0 gcc-3.3 macports-gcc-6 macports-gcc-7}
+                }
+            } else {
+                # i386 only
+                return {apple-gcc-4.2 gcc-4.0 macports-clang-3.3}
+            }
         }
     }
 
@@ -540,13 +578,33 @@ proc portconfigure::get_compiler_fallback {} {
     } elseif {[vercmp $xcodeversion 4.0] >= 0} {
         lappend compilers llvm-gcc-4.2 clang
     } else {
+        # 3.2.x
         lappend compilers gcc-4.2 clang llvm-gcc-4.2
     }
 
     # Determine which versions of clang we prefer
-    if {${configure.cxx_stdlib} eq "libc++"} {
+    # There is a recursion trap here: the default value of configure.cxx_stdlib
+    # is determined by a proc that may end up calling us to find out which
+    # compiler is being used. So, bypass that if the option hasn't already
+    # been set to a particular value.
+    if {![info exists option_defaults(configure.cxx_stdlib)]} {
+        set our_stdlib ${configure.cxx_stdlib}
+    } else {
+        set our_stdlib $cxx_stdlib
+    }
+    if {$our_stdlib eq "libc++"} {
         # clang-3.5+ require libc++
-        lappend compilers macports-clang-4.0 macports-clang-3.9 macports-clang-3.8 macports-clang-3.7
+        lappend compilers macports-clang-5.0 macports-clang-4.0
+
+        if {${os.major} < 17} {
+            # The High Sierra SDK requires a toolchain that can apply nullability to uuid_t
+            lappend compilers macports-clang-3.9
+        }
+
+        if {${os.major} < 16} {
+            # The Sierra SDK requires a toolchain that supports class properties
+            lappend compilers macports-clang-3.7
+        }
     }
 
     if {${os.major} < 16} {
@@ -734,8 +792,7 @@ proc portconfigure::configure_main {args} {
            configure.perl configure.python configure.ruby configure.install configure.awk configure.bison \
            configure.pkg_config configure.pkg_config_path \
            configure.ccache configure.distcc configure.cpp configure.javac configure.sdkroot \
-           configure.march configure.mtune configure.cxx_stdlib \
-           os.platform os.major
+           configure.march configure.mtune os.platform os.major
     foreach tool {cc cxx objc objcxx f77 f90 fc ld} {
         global configure.${tool} configure.${tool}_archflags
     }
@@ -805,10 +862,17 @@ proc portconfigure::configure_main {args} {
             CC CXX OBJC OBJCXX FC F77 F90 JAVAC \
             CFLAGS CPPFLAGS CXXFLAGS OBJCFLAGS OBJCXXFLAGS \
             FFLAGS F90FLAGS FCFLAGS LDFLAGS LIBS CLASSPATH \
-            PERL PYTHON RUBY INSTALL AWK BISON PKG_CONFIG PKG_CONFIG_PATH \
+            PERL PYTHON RUBY INSTALL AWK BISON PKG_CONFIG \
         } {
             set value [option configure.[string tolower $env_var]]
             append_to_environment_value configure $env_var {*}$value
+        }
+
+        foreach env_var { \
+            PKG_CONFIG_PATH \
+        } {
+            set value [option configure.[string tolower $env_var]]
+            append_to_environment_value configure $env_var [join $value ":"]
         }
 
         # https://trac.macports.org/ticket/34221

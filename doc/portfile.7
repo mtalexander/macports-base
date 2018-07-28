@@ -1,6 +1,6 @@
 .\" portfile.7
 .\"
-.\" Copyright (c) 2004-2014 The MacPorts Project
+.\" Copyright (c) 2004-2015, 2017-2018 The MacPorts Project
 .\" Copyright (c) 2002-2003 Apple Inc.
 .\" All rights reserved.
 .\"
@@ -208,7 +208,7 @@ Declares which platforms are supported by the port.
 .Dl platforms darwin
 .It Ic supported_archs
 The CPU architectures for which this port can be built. Archs currently
-supported by Mac OS X are: i386, ppc, ppc64, x86_64. If this option is not set,
+supported by macOS are: i386, ppc, ppc64, x86_64. If this option is not set,
 it is assumed that the port can build for all archs. If a port does not install
 any architecture-specific files, use the special value noarch.
 .br
@@ -284,7 +284,7 @@ List of checksums for the
 .Ic distfiles .
 The checksum
 .Ar type
-can currently be md5, sha1, rmd160 or sha256. The
+can currently be md5, sha1, rmd160, sha256 or size. The
 .Ar filename
 can be omitted if there is only one distfile.
 .br
@@ -588,7 +588,7 @@ Location to store downloaded distfiles.
 .Em read-only
 .br
 .Sy Default:
-.Em ${sysportpath}/distfiles/${dist_subdir}/
+.Em ${portdbpath}/distfiles/${dist_subdir}/
 .It Ic os.arch
 Identifies hardware type (e.g. "powerpc").
 .br
@@ -632,7 +632,7 @@ Group for MacPorts installation (e.g.
 .Sy Type:
 .Em read-only
 .It Ic applications_dir
-Absolute path to the final location to install Mac OS X application
+Absolute path to the final location to install macOS application
 bundles (.app directories).
 .br
 .Sy Type:
@@ -641,7 +641,7 @@ bundles (.app directories).
 .Sy Default:
 .Em /Applications/MacPorts
 .It Ic frameworks_dir
-Absolute path to the final location to install Mac OS X framework
+Absolute path to the final location to install macOS framework
 bundles (.framework directories).
 .br
 .Sy Type:
@@ -873,6 +873,20 @@ Sets extract.cmd to: lzma
 .br
 .Sy Example:
 .Dl use_lzma yes
+.It Ic use_tar
+Use an uncompressed tar archive.
+.br
+Sets extract.suffix to: .tar
+.br
+Sets extract.cmd to: tar
+.br
+Sets extract.pre_args to: -xf
+.br
+.Sy Type:
+.Em optional
+.br
+.Sy Example:
+.Dl use_tar yes
 .It Ic use_xz
 Use xz.
 .br
@@ -1262,7 +1276,7 @@ use the vanilla compiler suites installed via MacPorts.
 .Sy Example:
 .Dl configure.compiler llvm-gcc-4.2
 .It Ic configure.sdk_version
-Mac OS X SDK version to build against.
+macOS SDK version to build against.
 .br 
 .Sy Type:
 .Em optional
@@ -1478,7 +1492,7 @@ Test target to pass to
 .El
 .Sh STARTUPITEM OPTIONS
 If a port needs to run on system startup, it can use MacPorts
-startupitem keywords to install native OS X startup scripts.
+startupitem keywords to install native macOS startup scripts.
 Startup scripts require user interaction after port installation
 to activate them and instructions are given during port installs.
 .Bl -tag -width lc
@@ -1498,9 +1512,9 @@ Choose whether or not to generate a startup item.
 .Dl startupitem.create yes
 .It Ic startupitem.type
 Select the type of startupitem to generate. By default, a startupitem
-will be generated that is of the appropriate type for the OS. For
-instance, launchd is used on system 10.4, while SystemStarter is used
-on prior Mac OS X systems. A global default may be specified with the startupitem_type preference in ports.conf.
+will be generated that is of the appropriate type for the OS.
+For macOS this is always launchd.
+A global default may be specified with the startupitem_type preference in macports.conf.
 .br
 .Sy Type:
 .Em optional
@@ -1509,9 +1523,9 @@ on prior Mac OS X systems. A global default may be specified with the startupite
 .Em default
 .br
 .Sy Values:
-.Em SystemStarter launchd default rcNG
+.Em launchd default none
 .br
-.Sy Example
+.Sy Example:
 .Dl startupitem.type launchd
 .It Ic startupitem.name
 Displayed name of the startup item.
@@ -1521,6 +1535,34 @@ Displayed name of the startup item.
 .br
 .Sy Example:
 .Dl startupitem.name OpenSSH
+.It Ic startupitem.autostart
+Whether to automatically load the StartupItem after activating the port.
+.br
+.Sy Type:
+.Em optional
+.br
+.Sy Default:
+.Em no
+.br
+.Sy Values:
+.Em yes|no
+.br
+.Sy Example:
+.Dl startupitem.autostart yes
+.It Ic startupitem.debug
+Enable additional debug logging.
+.br
+.Sy Type:
+.Em optional
+.br
+.Sy Default:
+.Em no
+.br
+.Sy Values:
+.Em yes|no
+.br
+.Sy Example:
+.Dl startupitem.debug yes
 .It Ic startupitem.executable
 The name of the daemon to be run in the background. This is
 the preferred type of startup item rather than any of
@@ -1550,6 +1592,38 @@ startupitem.start, startupitem.stop and startupitem.restart.
 .br
 .Sy Example:
 .Dl startupitem.init FOO=start
+.It Ic startupitem.install
+Whether to install a link to the StartupItem in the appropriate
+subdirectory of /Library.
+.br
+.Sy Type:
+.Em optional
+.br
+.Sy Default:
+.Em yes
+.br
+.Sy Values:
+.Em yes|no
+.br
+.Sy Example:
+.Dl startupitem.install no
+.It Ic startupitem.location
+Chooses the subdirectory in which to install the StartupItem. Also
+affects how it will be loaded: LaunchDaemons must be loaded as root,
+and only one instance will run for the whole system. LaunchAgents are
+loaded as a normal user, and one instance per user can run.
+.br
+.Sy Type:
+.Em optional
+.br
+.Sy Default:
+.Em LaunchDaemons
+.br
+.Sy Values:
+.Em LaunchDaemons|LaunchAgents
+.br
+.Sy Example:
+.Dl startupitem.location LaunchAgents
 .It Ic startupitem.start
 Shell code executed to start the daemon.
 .br
@@ -1653,6 +1727,33 @@ machine's network state is detected.
 .br
 .Sy Example:
 .Dl startupitem.netchange yes
+.It Ic startupitems
+Used when a port needs to install more than one StartupItem, this
+option consists of a list where alternating elements represent keys
+and values. Each key corresponds to one of the startupitem.* options,
+and the following value is associated with it. Each StartupItem
+defined in the list must specify at least a name. Each other key/value
+pair is associated with the StartupItem named most recently in the
+list. Any keys that are not defined for a given StartupItem will use
+the value of the corresponding startupitem.* option.
+.br
+.Sy Type:
+.Em optional
+.br
+.Sy Default:
+.Em none (empty)
+.br
+.Sy Values:
+.Em List of keys and values
+.br
+.Sy Example:
+.Dl
+startupitems        name        myport-system \\
+                    location    LaunchDaemons \\
+                    executable  ${prefix}/sbin/myportd \\
+                    name        myport-session \\
+                    location    LaunchAgents \\
+                    executable  ${prefix}/bin/myport-agent
 .El
 .Sh DISTCHECK AND LIVECHECK OPTIONS
 MacPorts can automatically check if the software has been updated
@@ -1813,7 +1914,7 @@ value lists which variants are enabled by default.
 .Sy Example:
 .Dl default_variants +ssl +tcpd
 .It Ic universal_variant
-When using MacPorts on Mac OS X, a universal variant is defined and
+When using MacPorts on macOS, a universal variant is defined and
 the default behavior is to configure ports with universal flags
 (see the
 .Ic UNIVERSAL TARGET HOOKS
@@ -2084,7 +2185,8 @@ The -E flag does the same thing as in
 .Dl reinplace \*qs|/usr/local|${prefix}|g\*q doc/manpage.1
 .It Ic file
 Standard TCL command to manipulate file names and attributes, recommended if you wish to preserve Mac OS
-resource forks when destrooting ports on Mac OS X 10.3.x and Mac OS X 10.4.x . Use
+resource forks when destrooting ports.
+Use
 .Nm xinstall
 to also preserve Extended Attributes (i.e. Access Control Lists). See
 .Xr file n
@@ -2094,11 +2196,9 @@ Built-in shorthand alternative to "file copy".
 .It Ic move
 Built-in shorthand alternative to "file rename".
 .It Ic delete Ar
-Deletes each of the given files/directories. Behaves similarly to
-.Ic file delete -force
-except that
-.Ic file delete -force
-will fail to delete directories properly on 10.3 systems.
+Deletes each of the given files/directories.
+Behaves identically to
+.Ic file delete -force .
 .It Ic touch
 Built-in command mimicking the BSD touch command.
 .It Ic ln
