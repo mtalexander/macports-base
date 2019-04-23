@@ -155,13 +155,13 @@ namespace eval porttrace {
         create_slave $workpath $fifo
 
         # Launch darwintrace.dylib.
-        set tracelib [file join ${portutil::autoconf::tcl_package_path} darwintrace1.0 darwintrace.dylib]
+        set darwintracepath [file join ${portutil::autoconf::tcl_package_path} darwintrace1.0 darwintrace.dylib]
 
         # Add darwintrace.dylib as last entry in DYLD_INSERT_LIBRARIES
         if {[info exists env(DYLD_INSERT_LIBRARIES)] && [string length $env(DYLD_INSERT_LIBRARIES)] > 0} {
-            set env(DYLD_INSERT_LIBRARIES) "${env(DYLD_INSERT_LIBRARIES)}:${tracelib}"
+            set env(DYLD_INSERT_LIBRARIES) "${env(DYLD_INSERT_LIBRARIES)}:${darwintracepath}"
         } else {
-            set env(DYLD_INSERT_LIBRARIES) ${tracelib}
+            set env(DYLD_INSERT_LIBRARIES) ${darwintracepath}
         }
         # Tell traced processes where to find their communication socket back
         # to this code.
@@ -376,7 +376,7 @@ namespace eval porttrace {
         # Create the thread.
         set thread [macports_create_thread]
 
-        # The slave thred needs this file and macports 1.0
+        # The slave thread needs this file and macports 1.0
         thread::send $thread "package require porttrace 1.0"
         thread::send $thread "package require macports 1.0"
 
