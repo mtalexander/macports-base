@@ -773,10 +773,12 @@ proc platform {args} {
     set os [lindex $args 0]
     set args [lrange $args 1 [expr {$len - 2}]]
 
+    set release_re {(^[0-9]+$)}
+    set arch_re {([a-zA-Z0-9]*)}
     foreach arg $args {
-        if {[regexp {(^[0-9]+$)} $arg match result]} {
+        if {[regexp $release_re $arg match result]} {
             set release $result
-        } elseif {[regexp {([a-zA-Z0-9]*)} $arg match result]} {
+        } elseif {[regexp $arch_re $arg match result]} {
             set arch $result
         }
     }
@@ -1796,9 +1798,10 @@ proc open_statefile {args} {
 # $result, if any. Returns 1 if a line matched, 0 otherwise
 proc get_statefile_value {class fd result} {
     upvar $result upresult
+    set line_re "$class: (.*)"
     seek $fd 0
     while {[gets $fd line] >= 0} {
-        if {[regexp "$class: (.*)" $line match value]} {
+        if {[regexp $line_re $line match value]} {
             set upresult $value
             return 1
         }
@@ -1863,13 +1866,15 @@ proc check_statefile_variants {variations oldvariations fd} {
 
     set variants_found no
     set targets_found no
+    set variant_re "variant: (.*)"
+    set target_re "target: .*"
     seek $fd 0
     while {[gets $fd line] >= 0} {
-        if {[regexp "variant: (.*)" $line match name]} {
+        if {[regexp $variant_re $line match name]} {
             set upoldvariations([string range $name 1 end]) [string range $name 0 0]
             set variants_found yes
         }
-        if {[regexp "target: .*" $line]} {
+        if {[regexp $target_re $line]} {
             set targets_found yes
         }
     }
@@ -2112,8 +2117,6 @@ proc universal_setup {args} {
               [regexp {^macports-gcc-(\d+(?:\.\d+)?)?$} [option configure.compiler] -> gcc_version]
               ||
               [regexp {^macports-(mpich|openmpi)-gcc-(\d+(?:\.\d+)?)?$} [option configure.compiler] -> gcc_version]
-              ||
-              [regexp {^macports-dragonegg-(\d+\.\d+)(?:-gcc-(\d+\.\d+))?$} [option configure.compiler] -> llvm_version gcc_version]
           } {
         ui_debug "Compiler doesn't support universal builds, so not adding the default universal variant"
     } else {
@@ -2241,8 +2244,9 @@ proc handle_default_variants {option action {value ""}} {
                 set PortInfo(vinfo) {}
             }
             array set vinfo $PortInfo(vinfo)
+            set re {([-+])([-A-Za-z0-9_.]+)}
             foreach v $value {
-                if {[regexp {([-+])([-A-Za-z0-9_.]+)} $v whole val variant]} {
+                if {[regexp $re $v whole val variant]} {
                     # Retrieve the information associated with this variant.
                     if {![info exists vinfo($variant)]} {
                         set vinfo($variant) {}
@@ -2309,8 +2313,9 @@ proc adduser {name args} {
     set home /var/empty
     set shell /usr/bin/false
 
+    set keyval_re {([a-z]*)=(.*)}
     foreach arg $args {
-        if {[regexp {([a-z]*)=(.*)} $arg match key val]} {
+        if {[regexp $keyval_re $arg match key val]} {
             set $key $val
         }
     }
@@ -2417,8 +2422,9 @@ proc addgroup {name args} {
     set passwd {*}
     set users ""
 
+    set keyval_re {([a-z]*)=(.*)}
     foreach arg $args {
-        if {[regexp {([a-z]*)=(.*)} $arg match key val]} {
+        if {[regexp $keyval_re $arg match key val]} {
             set $key $val
         }
     }
@@ -3230,7 +3236,7 @@ proc check_supported_archs {} {
 
 # check if the installed xcode version is new enough
 proc _check_xcode_version {} {
-    global os.subplatform macosx_version xcodeversion
+    global os.subplatform macosx_version xcodeversion use_xcode
 
     if {${os.subplatform} eq "macosx"} {
         switch $macosx_version {
@@ -3296,9 +3302,11 @@ proc _check_xcode_version {} {
             }
         }
         if {$xcodeversion eq "none"} {
-            ui_warn "Xcode does not appear to be installed; most ports will likely fail to build."
             if {[file exists "/Applications/Install Xcode.app"]} {
                 ui_warn "You downloaded Xcode from the Mac App Store but didn't install it. Run \"Install Xcode\" in the /Applications folder."
+            }
+            if {[tbool use_xcode]} {
+                return -code error "This port requires Xcode, which was not found on your system."
             }
         } elseif {[vercmp $xcodeversion $min] < 0} {
             ui_error "The installed version of Xcode (${xcodeversion}) is too old to use on the installed OS version. Version $rec or later is recommended on macOS ${macosx_version}."

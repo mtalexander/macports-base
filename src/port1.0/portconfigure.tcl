@@ -256,11 +256,13 @@ default configure.pkg_config        {}
 default configure.pkg_config_path   {}
 
 options configure.build_arch configure.ld_archflags \
-        configure.sdk_version configure.sdkroot
+        configure.sdk_version configure.sdkroot \
+        configure.developer_dir
 default configure.build_arch    {[portconfigure::choose_supported_archs ${build_arch}]}
 default configure.ld_archflags  {[portconfigure::configure_get_ld_archflags]}
 default configure.sdk_version   {$macosx_sdk_version}
 default configure.sdkroot       {[portconfigure::configure_get_sdkroot ${configure.sdk_version}]}
+default configure.developer_dir {[portconfigure::configure_get_developer_dir]}
 foreach tool {cc objc f77 f90 fc} {
     options configure.${tool}_archflags
     default configure.${tool}_archflags  "\[portconfigure::configure_get_archflags $tool\]"
@@ -329,9 +331,6 @@ proc portconfigure::configure_start {args} {
         {^llvm-gcc-4\.2$}                   {Xcode LLVM-GCC 4.2}
         {^macports-clang$}                  {MacPorts Clang (port select)}
         {^macports-clang-(\d+\.\d+)$}       {MacPorts Clang %s}
-        {^macports-dragonegg-(\d+\.\d+)$}   {MacPorts DragonEgg %s}
-        {^macports-dragonegg-(\d+\.\d+)-gcc-(\d+\.\d+)$}
-            {MacPorts DragonEgg %s with GCC %s}
         {^macports-gcc$}                    {MacPorts GCC (port select)}
         {^macports-gcc-(\d+(?:\.\d+)?)$}    {MacPorts GCC %s}
         {^macports-llvm-gcc-4\.2$}          {MacPorts LLVM-GCC 4.2}
@@ -511,6 +510,20 @@ proc portconfigure::configure_get_sdkroot {sdk_version} {
     return -code error "Unable to determine location of a macOS SDK."
 }
 
+# internal function to determine DEVELOPER_DIR according to Xcode dependency
+proc portconfigure::configure_get_developer_dir {} {
+    global use_xcode developer_dir
+    set cltpath "/Library/Developer/CommandLineTools"
+    # Assume that the existence of libxcselect indiciates the earliest version of
+    # macOS that places CLT in /Library/Developer/CommandLineTools
+    # If port is Xcode-dependent or CommandLineTools directory is invalid, set to developer_dir
+    if {[tbool use_xcode] || ![file exists /usr/lib/libxcselect.dylib] || ![file executable [file join $cltpath usr bin make]]} {
+        return ${developer_dir}
+    } else {
+        return ${cltpath}
+    }
+}
+
 # internal function to determine the "-arch xy" flags for the compiler
 proc portconfigure::configure_get_universal_archflags {} {
     global configure.universal_archs
@@ -553,7 +566,6 @@ proc portconfigure::compiler_port_name {compiler} {
     set valid_compiler_ports {
         {^apple-gcc-(\d+)\.(\d+)$}                          {apple-gcc%s%s}
         {^macports-clang-(\d+\.\d+)$}                       {clang-%s}
-        {^macports-dragonegg-(\d+\.\d+)(-gcc-\d+\.\d+)?$}   {dragonegg-%s%s}
         {^macports-(llvm-)?gcc-(\d+)(?:\.(\d+))?$}          {%sgcc%s%s}
         {^macports-(mpich|openmpi|mpich-devel|openmpi-devel)-default$}                {%s-default}
         {^macports-(mpich|openmpi|mpich-devel|openmpi-devel)-clang$}                  {%s-clang}
@@ -972,31 +984,8 @@ proc portconfigure::get_mpi_wrapper {mpi compiler} {
 }
 # utility procedure: get system compiler version by running it
 proc compiler.command_line_tools_version {compiler} {
-    switch ${compiler} {
-        clang {
-            set re {clang(?:_.*)?-([0-9.]+)}
-        }
-        llvm-gcc-4.2 {
-            set re {LLVM build ([0-9.]+)}
-        }
-        gcc-4.2 {
-            set re {build ([0-9.]+)}
-        }
-        gcc-4.0 -
-        apple-gcc-4.2 {
-            set re {build ([0-9.]+)}
-        }
-        default {
-            return -code error "don't know how to determine build number of compiler \"${compiler}\""
-        }
-    }
     set cc [portconfigure::configure_get_compiler cc ${compiler}]
-    if {![file executable ${cc}]} return
-    if {[catch {regexp ${re} [exec ${cc} -v 2>@1] -> compiler_version}]} return
-    if {![info exists compiler_version]} {
-        return -code error "couldn't determine build number of compiler \"${compiler}\""
-    }
-    return ${compiler_version}
+    return [get_compiler_version ${cc}]
 }
 # internal function to choose compiler fallback list based on platform
 proc portconfigure::get_compiler_fallback {} {
@@ -1089,25 +1078,19 @@ proc portconfigure::get_fortran_fallback {} {
 
 # Find a developer tool
 proc portconfigure::find_developer_tool {name} {
-	global developer_dir
+    global developer_dir
 
-    # first try /usr/bin since this doesn't move around
-    set toolpath "/usr/bin/${name}"
-    if {[file executable $toolpath]} {
+    set toolpath [get_tool_path $name]
+    if {$toolpath ne ""} {
         return $toolpath
     }
 
-	# Use xcode's xcrun to find the named tool.
-	if {![catch {exec [findBinary xcrun $portutil::autoconf::xcrun_path] -find ${name}} toolpath]} {
-		return ${toolpath}
-	}
-
-	# If xcrun failed to find the tool, return a path from
-	# the developer_dir.
-	# The tool may not be there, but we'll leave it up to
-	# the invoking code to figure out that it doesn't have
-	# a valid compiler
-	return "${developer_dir}/usr/bin/${name}"
+    # If we failed to find the tool, return a path from
+    # the developer_dir.
+    # The tool may not be there, but we'll leave it up to
+    # the invoking code to figure out that it doesn't have
+    # a valid compiler
+    return "${developer_dir}/usr/bin/${name}"
 }
 
 
@@ -1190,21 +1173,6 @@ proc portconfigure::configure_get_compiler {type {compiler {}}} {
             cxx     -
             objcxx  { return ${prefix}/bin/clang++${suffix} }
             cpp     { return ${prefix}/bin/clang-cpp${suffix} }
-        }
-    } elseif {[regexp {^macports-dragonegg(-\d+\.\d+)(?:-gcc(-\d+\.\d+))?$} $compiler \
-                -> infix suffix]} {
-        if {$suffix ne ""} {
-            set suffix "-mp${suffix}"
-        }
-        switch $type {
-            cc      -
-            objc    { return ${prefix}/bin/dragonegg${infix}-gcc${suffix} }
-            cxx     -
-            objcxx  { return ${prefix}/bin/dragonegg${infix}-g++${suffix} }
-            cpp     { return ${prefix}/bin/dragonegg${infix}-cpp${suffix} }
-            fc      -
-            f77     -
-            f90     { return ${prefix}/bin/dragonegg${infix}-gfortran${suffix} }
         }
     } elseif {[regexp {^macports-gcc(-\d+(?:\.\d+)?)?$} $compiler -> suffix]} {
         if {$suffix ne ""} {
@@ -1335,15 +1303,7 @@ proc portconfigure::add_compiler_port_dependencies {compiler} {
         depends_build-append port:$compiler_port
 
         # add C++ runtime dependency if necessary
-        if {
-            [regexp {^macports-gcc-(\d+(?:\.\d+)?)?$} ${compiler} -> gcc_version]
-            ||
-            [regexp {^macports-dragonegg-(\d+\.\d+)(?:-gcc-(\d+\.\d+))?$} ${compiler} -> llvm_version gcc_version]
-        } {
-            if {[info exists llvm_version] && ${gcc_version} eq ""} {
-                # port dragonegg-3.4 defaults to GCC version 4.6
-                set gcc_version 4.6
-            }
+        if {[regexp {^macports-gcc-(\d+(?:\.\d+)?)?$} ${compiler} -> gcc_version]} {
             set libgccs ""
             set dependencies_file [getportresourcepath $porturl "port1.0/compilers/gcc_dependencies.tcl"]
             if {[file exists ${dependencies_file}]} {
@@ -1471,6 +1431,7 @@ proc portconfigure::configure_main {args} {
             CFLAGS CPPFLAGS CXXFLAGS OBJCFLAGS OBJCXXFLAGS \
             FFLAGS F90FLAGS FCFLAGS LDFLAGS LIBS CLASSPATH \
             PERL PYTHON RUBY INSTALL AWK BISON PKG_CONFIG \
+            DEVELOPER_DIR \
         } {
             set value [option configure.[string tolower $env_var]]
             append_to_environment_value configure $env_var {*}$value
