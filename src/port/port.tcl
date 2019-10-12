@@ -774,9 +774,17 @@ proc get_outdated_ports {} {
                 set regref [registry::open_entry $portname $installed_version $installed_revision $installed_variants $installed_epoch]
                 set os_platform_installed [registry::property_retrieve $regref os_platform]
                 set os_major_installed [registry::property_retrieve $regref os_major]
-                if {$os_platform_installed ne "" && $os_platform_installed != 0
+                set cxx_stdlib_installed [registry::property_retrieve $regref cxx_stdlib]
+                set cxx_stdlib_overridden [registry::property_retrieve $regref cxx_stdlib_overridden]
+                if {${macports::cxx_stdlib} eq "libc++"} {
+                    set wrong_stdlib libstdc++
+                } else {
+                    set wrong_stdlib libc++
+                }
+                if {($os_platform_installed ne "" && $os_platform_installed != 0
                     && $os_major_installed ne "" && $os_major_installed != 0
-                    && ($os_platform_installed != ${macports::os_platform} || $os_major_installed != ${macports::os_major})} {
+                    && ($os_platform_installed != ${macports::os_platform} || $os_major_installed != ${macports::os_major}))
+                    || ($cxx_stdlib_overridden == 0 && $cxx_stdlib_installed eq $wrong_stdlib)} {
                     set comp_result -1
                 }
             }
@@ -990,7 +998,7 @@ proc get_dep_ports {portname recursive} {
 
     # gather its deps
     set results {}
-    set deptypes {depends_fetch depends_extract depends_build depends_lib depends_run depends_test}
+    set deptypes {depends_fetch depends_extract depends_patch depends_build depends_lib depends_run depends_test}
 
     set deplist {}
     foreach type $deptypes {
@@ -2048,13 +2056,16 @@ proc action_info { action portlist opts } {
         # Interpret a convenient field abbreviation
         if {[info exists options(ports_info_depends)] && $options(ports_info_depends) eq "yes"} {
             array unset options ports_info_depends
-            set options(ports_info_depends_fetch) yes
-            set options(ports_info_depends_extract) yes
-            set options(ports_info_depends_patch) yes
-            set options(ports_info_depends_build) yes
-            set options(ports_info_depends_lib) yes
-            set options(ports_info_depends_run) yes
-            set options(ports_info_depends_test) yes
+            set all_depends_options [list ports_info_depends_fetch ports_info_depends_extract \
+                ports_info_depends_patch ports_info_depends_build ports_info_depends_lib \
+                ports_info_depends_run ports_info_depends_test]
+            foreach depends_option $all_depends_options {
+                set options($depends_option) yes
+            }
+            # insert the expanded options into the ordering info
+            set order_pos [lsearch -exact $global_options(options_${action}_order) ports_info_depends]
+            set global_options(options_${action}_order) [lreplace $global_options(options_${action}_order) \
+                $order_pos $order_pos {*}$all_depends_options]
         }
 
         # Set up our field separators
@@ -2096,15 +2107,13 @@ proc action_info { action portlist opts } {
         # Spin through action options, emitting information for any found
         set fields {}
 
-        # This contains the display fields in random order
-        set opts_info [array names options ports_info_*]
         # This contains all parameters in order given on command line
         set opts_action $global_options(options_${action}_order)
         # Get the display fields in order provided on command line
         #  ::struct::set intersect does not keep order of items
         set opts_todo {}
         foreach elem $opts_action {
-            if {$elem in $opts_info} {
+            if {[info exists options($elem)]} {
                 lappend opts_todo $elem
             }
         }
@@ -2974,7 +2983,7 @@ proc action_deps { action portlist opts } {
         if {[info exists options(ports_${action}_no-build)] && [string is true -strict $options(ports_${action}_no-build)]} {
             set deptypes {depends_lib depends_run}
         } else {
-            set deptypes {depends_fetch depends_extract depends_build depends_lib depends_run depends_test}
+            set deptypes {depends_fetch depends_extract depends_patch depends_build depends_lib depends_run depends_test}
         }
 
         array unset portinfo
@@ -3413,6 +3422,18 @@ proc action_outdated { action portlist opts } {
                     && ($os_platform_installed != ${macports::os_platform} || $os_major_installed != ${macports::os_major})} {
                     set comp_result -1
                     set reason { (platform $os_platform_installed $os_major_installed != ${macports::os_platform} ${macports::os_major})}
+                } else {
+                    set cxx_stdlib_installed [registry::property_retrieve $regref cxx_stdlib]
+                    set cxx_stdlib_overridden [registry::property_retrieve $regref cxx_stdlib_overridden]
+                    if {${macports::cxx_stdlib} eq "libc++"} {
+                        set wrong_stdlib libstdc++
+                    } else {
+                        set wrong_stdlib libc++
+                    }
+                    if {$cxx_stdlib_overridden == 0 && $cxx_stdlib_installed eq $wrong_stdlib} {
+                        set comp_result -1
+                        set reason { (C++ stdlib $cxx_stdlib_installed != ${macports::cxx_stdlib})}
+                    }
                 }
             }
 
@@ -4545,6 +4566,8 @@ proc parse_options { action ui_options_name global_options_name } {
                         set ui_options(ports_quiet) yes
                         # quiet implies noninteractive
                         set ui_options(ports_noninteractive) yes
+                        # quiet implies no warning for outdated PortIndex
+                        set ui_options(ports_no_old_index_warning) 1
                     }
                     p {
                         # Ignore errors while processing within a command

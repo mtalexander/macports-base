@@ -207,6 +207,10 @@ namespace eval porttrace {
             }
         }
 
+        # Allow timezone info & access to system certificates
+        allow trace_sandbox "/var/db/timezone/zoneinfo"
+        allow trace_sandbox "/var/db/mds/system"
+
         # Allow access to SDK if it's not inside the Developer folder.
         if {${configure.sdkroot} ne ""} {
             allow trace_sandbox "${configure.sdkroot}"
@@ -228,7 +232,7 @@ namespace eval porttrace {
         lappend xcode_paths [file join {*}$ddsplit]
 
         set cltpath "/Library/Developer/CommandLineTools"
-        if {[tbool use_xcode] || ![file exists /usr/lib/libxcselect.dylib] || ![file executable [file join $cltpath usr bin make]]} {
+        if {[tbool use_xcode]} {
             foreach xcode_path $xcode_paths {
                 allow trace_sandbox $xcode_path
             }

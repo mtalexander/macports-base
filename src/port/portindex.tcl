@@ -221,7 +221,7 @@ for {set i 0} {$i < $argc} {incr i} {
                     set os_arch [lindex $platlist 3]
                 } else {
                     if {$os_platform eq "macosx"} {
-                        if {$os_major < 13} {
+                        if {$os_major < 10} {
                             set cxx_stdlib libstdc++
                         } else {
                             set cxx_stdlib libc++
@@ -300,10 +300,10 @@ set tempportindex [mktemp "/tmp/mports.portindex.XXXXXXXX"]
 set fd [open $tempportindex w]
 set save_prefix ${macports::prefix}
 foreach key {categories depends_fetch depends_extract depends_patch \
-             depends_build \
-             depends_lib depends_run depends_test description epoch homepage \
-             long_description maintainers name platforms revision variants \
-             version portdir replaced_by license installs_libs conflicts} {
+             depends_build depends_lib depends_run depends_test \
+             description epoch homepage long_description maintainers \
+             name platforms revision variants version portdir \
+             replaced_by license installs_libs conflicts known_fail} {
     set keepkeys($key) 1
 }
 

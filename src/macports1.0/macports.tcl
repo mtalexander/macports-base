@@ -462,7 +462,6 @@ proc macports::setxcodeinfo {name1 name2 op} {
                     }
                 }
             } catch {*} {
-                ui_warn "xcodebuild exists but failed to execute"
                 set macports::xcodeversion none
             }
         }
@@ -588,6 +587,10 @@ proc macports::_is_valid_developer_dir {dir} {
 
 
 proc mportinit {{up_ui_options {}} {up_options {}} {up_variations {}}} {
+    # Disable unknown(n)'s behavior of running unknown commands in the system
+    # shell
+    set ::auto_noexec yes
+
     if {$up_ui_options eq {}} {
         array set macports::ui_options {}
     } else {
@@ -1121,7 +1124,7 @@ match macports.conf.default."
         }
     }
     if {![info exists macports::cxx_stdlib]} {
-        if {$os_platform eq "darwin" && $os_major >= 13} {
+        if {$os_platform eq "darwin" && $os_major >= 10} {
             set macports::cxx_stdlib libc++
         } elseif {$os_platform eq "darwin"} {
             set macports::cxx_stdlib libstdc++
@@ -2102,7 +2105,12 @@ proc _mportexec {target mport} {
     # xxx: set the work path?
     set workername [ditem_key $mport workername]
     $workername eval {validate_macportsuser}
+
+    # If the target doesn't need a toolchain (e.g. because an archive is
+    # available and we're not going to build it), don't check for the Xcode
+    # version (and presence for use_xcode yes ports).
     if {![catch {$workername eval "check_variants $target"} result] && $result == 0 &&
+        (![macports::_target_needs_toolchain $workername $target] || (![catch {$workername eval {_check_xcode_version}} result] && $result == 0)) &&
         ![catch {$workername eval {check_supported_archs}} result] && $result == 0 &&
         ![catch {$workername eval "eval_targets $target"} result] && $result == 0} {
         # If auto-clean mode, clean-up after dependency install
@@ -2147,10 +2155,9 @@ proc mportexec {mport target} {
         set log_needs_pop yes
     }
 
-    # Use _target_needs_deps as a proxy for whether we're going to
-    # build and will therefore need to check Xcode version and
-    # supported_archs.
-    if {[macports::_target_needs_deps $target]} {
+    # Use _target_needs_toolchain as a proxy for whether we're going to build
+    # and will therefore need to check Xcode version and supported_archs.
+    if {[macports::_target_needs_toolchain $workername $target]} {
         # possibly warn or error out depending on how old Xcode is
         if {[$workername eval {_check_xcode_version}] != 0} {
             if {$log_needs_pop} {
@@ -3644,6 +3651,44 @@ proc macports::_target_needs_deps {target} {
     }
 }
 
+##
+# Determine if the given target of the given port needs a toolchain. Returns
+# true iff the target will require a compiler (or a different part of
+# a standard toolchain) to successfully execute.
+#
+# Returns false otherwise, in which case it can be assumed that no toolchain is
+# required for the successful execution of this task.
+#
+# @param workername A reference to the port interpreter of the port for which
+#                   this function should check whether a toolchain is needed.
+# @param target The target that will be run for this port
+# @return true iff a toolchain is needed for this port, false otherwise
+proc macports::_target_needs_toolchain {workername target} {
+    switch -- $target {
+        configure -
+        build -
+        test -
+        destroot {
+            return yes
+        }
+
+        install -
+        activate -
+        dmg -
+        mdmg -
+        pkg -
+        mpkg {
+            # check if an archive is available; if there isn't we'll need
+            # a toolchain for these
+            return [expr {![$workername eval _archive_available]}]
+        }
+
+        default {
+            return no
+        }
+    }
+}
+
 # Determine dependency types required for target
 proc macports::_deptypes_for_target {target workername} {
     switch -- $target {
@@ -3896,6 +3941,8 @@ proc macports::_upgrade {portname dspec variationslist optionslist {depscachenam
     set requestedflag [registry::property_retrieve $regref requested]
     set os_platform_installed [registry::property_retrieve $regref os_platform]
     set os_major_installed [registry::property_retrieve $regref os_major]
+    set cxx_stdlib_installed [registry::property_retrieve $regref cxx_stdlib]
+    set cxx_stdlib_overridden [registry::property_retrieve $regref cxx_stdlib_overridden]
 
     # Before we do
     # dependencies, we need to figure out the final variants,
@@ -4008,6 +4055,10 @@ proc macports::_upgrade {portname dspec variationslist optionslist {depscachenam
                   && ([_mportkey $mport os.platform] ne $os_platform_installed
                   || [_mportkey $mport os.major] != $os_major_installed)} {
             ui_debug "platform mismatch ... upgrading!"
+            set build_override 1
+        } elseif {$cxx_stdlib_overridden == 0 && ($cxx_stdlib_installed eq "libstdc++" || $cxx_stdlib_installed eq "libc++")
+                  && [_mportkey $mport configure.cxx_stdlib] ne $cxx_stdlib_installed} {
+            ui_debug "cxx_stdlib mismatch ... upgrading!"
             set build_override 1
         } elseif {$is_revupgrade_second_run} {
             ui_debug "rev-upgrade override ... upgrading (from source)!"
@@ -5340,8 +5391,7 @@ proc macports::get_compiler_version {compiler} {
             set re {LLVM build ([0-9.]+)}
         }
         gcc-4.2 -
-        gcc-4.0 -
-        apple-gcc-4.2 {
+        gcc-4.0 {
             set re {build ([0-9.]+)}
         }
         default {

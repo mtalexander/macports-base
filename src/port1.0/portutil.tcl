@@ -425,6 +425,10 @@ proc command_exec {command args} {
     if {[option compiler.library_path] ne ""} {
         set ${varprefix}.env_array(LIBRARY_PATH) [join [option compiler.library_path] :]
     }
+    set ${varprefix}.env_array(DEVELOPER_DIR) [option configure.developer_dir]
+    if {[option configure.sdkroot] ne ""} {
+        set ${varprefix}.env_array(SDKROOT) [option configure.sdkroot]
+    }
 
     # Debug that.
     ui_debug "Environment: [environment_array_to_string ${varprefix}.env_array]"
@@ -1472,6 +1476,8 @@ proc target_run {ditem} {
                     if {[llength $deptypes] > 0} {tracelib setdeps $deplist}
                 }
 
+                # For {} blocks in the Portfile, export DEVELOPER_DIR to prevent Xcode binaries if shouldn't be used
+                set ::env(DEVELOPER_DIR) [option configure.developer_dir]
                 if {$result == 0} {
                     foreach pre [ditem_key $ditem pre] {
                         ui_debug "Executing $pre"
@@ -1501,6 +1507,8 @@ proc target_run {ditem} {
                         if {$result != 0} { break }
                     }
                 }
+                # Keep the environment clean by unsetting DEVELOPER_DIR
+                unset -nocomplain ::env(DEVELOPER_DIR)
 
                 # Check dependencies & file creations outside workpath.
                 if {[tbool ports_trace]
@@ -1778,10 +1786,9 @@ proc open_statefile {args} {
             if {$result eq "EAGAIN"} {
                 ui_notice "Waiting for lock on $statefile"
                 adv-flock $fd -exclusive
-            } elseif {$result eq "EOPNOTSUPP"} {
-                # Locking not supported, just return
-                return $fd
-            } else {
+            } elseif {$result ne "EOPNOTSUPP"} {
+                # We can continue without locking if it's not supported,
+                # but other errors are likely a genuine problem.
                 return -code error "$result obtaining lock on $statefile"
             }
         }
@@ -2113,11 +2120,7 @@ proc universal_setup {args} {
         ui_debug "OS doesn't support universal builds, so not adding the default universal variant"
     } elseif {[llength [option supported_archs]] == 1} {
         ui_debug "only one arch supported, so not adding the default universal variant"
-    } elseif {
-              [regexp {^macports-gcc-(\d+(?:\.\d+)?)?$} [option configure.compiler] -> gcc_version]
-              ||
-              [regexp {^macports-(mpich|openmpi)-gcc-(\d+(?:\.\d+)?)?$} [option configure.compiler] -> gcc_version]
-          } {
+    } elseif {![portconfigure::arch_flag_supported [option configure.compiler] yes]} {
         ui_debug "Compiler doesn't support universal builds, so not adding the default universal variant"
     } else {
         ui_debug "adding the default universal variant"
@@ -3236,7 +3239,7 @@ proc check_supported_archs {} {
 
 # check if the installed xcode version is new enough
 proc _check_xcode_version {} {
-    global os.subplatform macosx_version xcodeversion use_xcode
+    global os.subplatform macosx_version xcodeversion use_xcode subport
 
     if {${os.subplatform} eq "macosx"} {
         switch $macosx_version {
@@ -3288,17 +3291,22 @@ proc _check_xcode_version {} {
             10.13 {
                 set min 9.0
                 set ok 9.0
-                set rec 9.3
+                set rec 9.4.1
             }
             10.14 {
                 set min 10.0
                 set ok 10.0
-                set rec 10.0
+                set rec 10.3
+            }
+            10.15 {
+                set min 11.0
+                set ok 11.0
+                set rec 11.0
             }
             default {
-                set min 10.0
-                set ok 10.0
-                set rec 10.0
+                set min 11.0
+                set ok 11.0
+                set rec 11.0
             }
         }
         if {$xcodeversion eq "none"} {
@@ -3306,7 +3314,9 @@ proc _check_xcode_version {} {
                 ui_warn "You downloaded Xcode from the Mac App Store but didn't install it. Run \"Install Xcode\" in the /Applications folder."
             }
             if {[tbool use_xcode]} {
-                return -code error "This port requires Xcode, which was not found on your system."
+                ui_error "Port ${subport} requires a full Xcode installation, which was not found on your system."
+                ui_error "You can install Xcode from the Mac App Store or https://developer.apple.com/xcode/"
+                return 1
             }
         } elseif {[vercmp $xcodeversion $min] < 0} {
             ui_error "The installed version of Xcode (${xcodeversion}) is too old to use on the installed OS version. Version $rec or later is recommended on macOS ${macosx_version}."
