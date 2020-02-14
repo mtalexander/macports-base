@@ -55,7 +55,10 @@ options prefix name version revision epoch categories maintainers \
         macosx_deployment_target universal_variant os.universal_supported \
         supported_archs depends_skip_archcheck installs_libs \
         license_noconflict copy_log_files \
-        compiler.cpath compiler.library_path \
+        compiler.cpath compiler.library_path compiler.log_verbose_output \
+        compiler.limit_flags \
+        compiler.support_environment_paths \
+        compiler.support_environment_sdkroot \
         add_users use_xcode
 
 proc portmain::check_option_integer {option action args} {
@@ -149,6 +152,10 @@ if {[option os.platform] eq "darwin" && [option os.subplatform] eq "macosx"} {
 
 default compiler.cpath {${prefix}/include}
 default compiler.library_path {${prefix}/lib}
+default compiler.log_verbose_output yes
+default compiler.limit_flags no
+default compiler.support_environment_paths no
+default compiler.support_environment_sdkroot no
 
 # Record initial euid/egid
 set euid [geteuid]

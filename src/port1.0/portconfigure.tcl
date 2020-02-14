@@ -32,6 +32,7 @@
 
 package provide portconfigure 1.0
 package require portutil 1.0
+package require portprogress 1.0
 
 set org.macports.configure [target_new org.macports.configure portconfigure::configure_main]
 target_provides ${org.macports.configure} configure
@@ -234,8 +235,24 @@ options configure.optflags \
 default configure.optflags      -Os
 default configure.cflags        {${configure.optflags}}
 default configure.objcflags     {${configure.optflags}}
-default configure.cppflags      {-I${prefix}/include}
-default configure.ldflags       {-L${prefix}/lib -Wl,-headerpad_max_install_names}
+default configure.cppflags      {[portconfigure::configure_get_cppflags]}
+proc portconfigure::configure_get_cppflags {} {
+    global prefix
+    if {[option compiler.limit_flags]} {
+        return ""
+    } else {
+        return -I${prefix}/include
+    }
+}
+default configure.ldflags       {[portconfigure::configure_get_ldflags]}
+proc portconfigure::configure_get_ldflags {} {
+    global prefix
+    if {[option compiler.limit_flags]} {
+        return -Wl,-headerpad_max_install_names
+    } else {
+        return "-L${prefix}/lib -Wl,-headerpad_max_install_names"
+    }
+}
 default configure.libs          {}
 default configure.fflags        {${configure.optflags}}
 default configure.f90flags      {${configure.optflags}}
@@ -737,10 +754,10 @@ proc portconfigure::max_version {verA verB} {
 # https://trac.macports.org/wiki/XcodeVersionInfo
 #--------------------------------------------------------------------
 #| C++ Standard |   Clang   |  Xcode Clang  |   Xcode   |    GCC    |
-#|--------------------------------=---------------------------------|
+#|------------------------------------------------------------------|
 #| 1998 (C++98) |     -     |       -       |     -     |     -     |
 #| 2011 (C++11) |    3.3    |   500.2.75    |    5.0    |   4.8.1   |
-#| 2014 (C++14) |    3.4    |   600.0.54    |    6.1    |     5     |
+#| 2014 (C++14) |    3.4    |   602         |    6.3    |     5     |
 #| 2017 (C++17) |    5.0    |   902.0.39.1  |    9.3    |     7     |
 #--------------------------------------------------------------------
 #
@@ -756,6 +773,21 @@ proc portconfigure::max_version {verA verB} {
 #|      4.0       | Partial |    Future?    | Future? |   4.9   |
 #|      4.5       | Partial |    Future?    | Future? |   ???   |
 #----------------------------------------------------------------
+#
+# https://trac.macports.org/wiki/CompilerEnvironmentVariables
+# https://trac.macports.org/wiki/CompilerSelection#EnvironmentVariables
+#--------------------------------------------------------------------
+#|   Environment Variable   | Xcode Clang | Xcode GCC | Clang | GCC |
+#|------------------------------------------------------------------|
+#| CPATH                    |   318.0.4   |    all    |  all  | all |
+#| LIBRARY_PATH             |  421.0.57   |    all    |  all  | all |
+#| MACOSX_DEPLOYMENT_TARGET |     all     |    all    |  all  | all |
+#| SDKROOT                  | OS X 10.9*  |   none    |  all  |  7  |
+#| DEVELOPER_DIR            | OS X 10.9*  |    N/A    |  N/A  | N/A |
+#| CC_PRINT_OPTIONS         |     all     |    all    |  all  | all |
+#| CC_PRINT_OPTIONS_FILE    |     all     |    all    |  all  | all |
+#--------------------------------------------------------------------
+# * /usr/lib/libxcselect.dylib exists
 #
 # utility procedure: get minimum command line compilers version based on restrictions
 proc portconfigure::get_min_command_line {compiler} {
@@ -786,16 +818,37 @@ proc portconfigure::get_min_command_line {compiler} {
             if {${compiler.cxx_standard} >= 2017} {
                 set min_value [max_version $min_value 902.0.39.1]
             } elseif {${compiler.cxx_standard} >= 2014} {
-                set min_value [max_version $min_value 600.0.54]
+                set min_value [max_version $min_value 602]
             } elseif {${compiler.cxx_standard} >= 2011} {
-                set min_value [max_version $min_value 500.2.75]
+                if {${compiler.thread_local_storage}} {
+                    # macOS has supported thread-local storage since Mac OS X Lion.
+                    # So __thread (GNU extension) and _Thread_local (C11) could be used.
+                    # However, the C++11 keyword was not supported until Xcode 8
+                    #    (https://developer.apple.com/videos/play/wwdc2016-405/?time=354).
+                    set min_value [max_version $min_value 800.0.38]
+                } else {
+                    set min_value [max_version $min_value 500.2.75]
+                }
+            }
+            if {[option compiler.limit_flags] || [option compiler.support_environment_paths]} {
+                set min_value [max_version $min_value 421.0.57]
+            }
+            if {
+                ([option compiler.limit_flags] || [option compiler.support_environment_sdkroot]) &&
+                [option configure.sdkroot] ne "" &&
+                ![file exists /usr/lib/libxcselect.dylib]
+            } {
+                return none
             }
         }
         llvm-gcc-4.2 -
         gcc-4.2 -
         gcc-4.0 -
         apple-gcc-4.2 {
-            if {${compiler.c_standard} > 1999 || ${compiler.cxx_standard} >= 2011 || [option configure.cxx_stdlib] eq "libc++"} {
+            if {${compiler.c_standard} > 1999 || ${compiler.cxx_standard} >= 2011 || [option configure.cxx_stdlib] eq "libc++" || ${compiler.thread_local_storage}} {
+                return none
+            }
+            if {([option compiler.limit_flags] || [option compiler.support_environment_sdkroot]) && [option configure.sdkroot] ne ""} {
                 return none
             }
         }
@@ -871,7 +924,12 @@ proc portconfigure::get_min_gcc {} {
         # GCC emulates thread-local storage, but it seems to be broken on older versions of GCC
         set min_value [max_version $min_value 4.5]
     }
-
+    if {
+        ([option compiler.limit_flags] || [option compiler.support_environment_sdkroot]) &&
+        [option configure.sdkroot] ne ""
+    } {
+        set min_value [max_version $min_value 7.0]
+    }
     return ${min_value}
 }
 # utility procedure: get minimum Gfortran version based on restrictions
@@ -891,6 +949,12 @@ proc portconfigure::get_min_gfortran {} {
         # GCC emulates thread-local storage, but it seems to be broken on older versions of GCC
         set min_value [max_version $min_value 4.5]
     }
+    if {
+        ([option compiler.limit_flags] || [option compiler.support_environment_sdkroot]) &&
+        [option configure.sdkroot] ne ""
+    } {
+        set min_value [max_version $min_value 7.0]
+    }
     return ${min_value}
 }
 #
@@ -902,6 +966,12 @@ proc portconfigure::g95_ok {} {
     }
     if {${compiler.openmp_version} ne ""} {
         # G95 does not support OpenMP
+        return no
+    }
+    if {
+        ([option compiler.limit_flags] || [option compiler.support_environment_sdkroot]) &&
+        [option configure.sdkroot] ne ""
+    } {
         return no
     }
     return yes
@@ -993,10 +1063,26 @@ proc portconfigure::get_clang_compilers {} {
         source ${compiler_file}
     } else {
         ui_debug "clang_compilers.tcl not found in ports tree, using built-in selections"
-        lappend compilers macports-clang-8.0 macports-clang-7.0 macports-clang-6.0 macports-clang-5.0
+        # clang 9.0 and older build on 10.6+ (darwin 10)
+        # clang 7.0 and older build on 10.5+ (darwin 9)
+        # clang 3.4 and older build on 10.4+ (darwin 8)
+        if {${os.major} >= 10} {
+            lappend compilers macports-clang-9.0 \
+                macports-clang-8.0
+        }
+
+        if {${os.major} >= 9} {
+            lappend compilers macports-clang-7.0 \
+                macports-clang-6.0 \
+                macports-clang-5.0
+        }
+
         if {${os.major} < 16} {
             # The Sierra SDK requires a toolchain that supports class properties
-            lappend compilers macports-clang-3.7 macports-clang-3.4
+            if {${os.major} >= 9} {
+                lappend compilers macports-clang-3.7
+            }
+            lappend compilers macports-clang-3.4
             if {${os.major} < 9} {
                 lappend compilers macports-clang-3.3
             }
@@ -1164,7 +1250,7 @@ proc portconfigure::find_developer_tool {name} {
 
 # internal function to find correct compilers
 proc portconfigure::configure_get_compiler {type {compiler {}}} {
-    global configure.compiler prefix
+    global configure.compiler prefix_frozen
     if {$compiler eq ""} {
         if {[option compiler.require_fortran]} {
             switch $type {
@@ -1185,14 +1271,14 @@ proc portconfigure::configure_get_compiler {type {compiler {}}} {
     if {[regexp {^apple-gcc(-4\.[02])$} $compiler -> suffix]} {
         switch $type {
             cc      -
-            objc    { return ${prefix}/bin/gcc-apple${suffix} }
+            objc    { return ${prefix_frozen}/bin/gcc-apple${suffix} }
             cxx     -
             objcxx  {
                 if {$suffix eq "-4.2"} {
-                    return ${prefix}/bin/g++-apple${suffix}
+                    return ${prefix_frozen}/bin/g++-apple${suffix}
                 }
             }
-            cpp     { return ${prefix}/bin/cpp-apple${suffix} }
+            cpp     { return ${prefix_frozen}/bin/cpp-apple${suffix} }
         }
     } elseif {$compiler eq "clang"} {
         switch $type {
@@ -1229,18 +1315,18 @@ proc portconfigure::configure_get_compiler {type {compiler {}}} {
         }
         switch $type {
             cc      -
-            objc    { return ${prefix}/bin/clang${suffix} }
+            objc    { return ${prefix_frozen}/bin/clang${suffix} }
             cxx     -
-            objcxx  { return ${prefix}/bin/clang++${suffix} }
+            objcxx  { return ${prefix_frozen}/bin/clang++${suffix} }
         }
     } elseif {[regexp {^macports-clang(-\d+\.\d+)$} $compiler -> suffix]} {
         set suffix "-mp${suffix}"
         switch $type {
             cc      -
-            objc    { return ${prefix}/bin/clang${suffix} }
+            objc    { return ${prefix_frozen}/bin/clang${suffix} }
             cxx     -
-            objcxx  { return ${prefix}/bin/clang++${suffix} }
-            cpp     { return ${prefix}/bin/clang-cpp${suffix} }
+            objcxx  { return ${prefix_frozen}/bin/clang++${suffix} }
+            cpp     { return ${prefix_frozen}/bin/clang-cpp${suffix} }
         }
     } elseif {[regexp {^macports-gcc(-\d+(?:\.\d+)?)?$} $compiler -> suffix]} {
         if {$suffix ne ""} {
@@ -1248,62 +1334,62 @@ proc portconfigure::configure_get_compiler {type {compiler {}}} {
         }
         switch $type {
             cc      -
-            objc    { return ${prefix}/bin/gcc${suffix} }
+            objc    { return ${prefix_frozen}/bin/gcc${suffix} }
             cxx     -
-            objcxx  { return ${prefix}/bin/g++${suffix} }
-            cpp     { return ${prefix}/bin/cpp${suffix} }
+            objcxx  { return ${prefix_frozen}/bin/g++${suffix} }
+            cpp     { return ${prefix_frozen}/bin/cpp${suffix} }
             fc      -
             f77     -
-            f90     { return ${prefix}/bin/gfortran${suffix} }
+            f90     { return ${prefix_frozen}/bin/gfortran${suffix} }
         }
     } elseif {$compiler eq "macports-llvm-gcc-4.2"} {
         switch $type {
             cc      -
-            objc    { return ${prefix}/bin/llvm-gcc-4.2 }
+            objc    { return ${prefix_frozen}/bin/llvm-gcc-4.2 }
             cxx     -
-            objcxx  { return ${prefix}/bin/llvm-g++-4.2 }
-            cpp     { return ${prefix}/bin/llvm-cpp-4.2 }
+            objcxx  { return ${prefix_frozen}/bin/llvm-g++-4.2 }
+            cpp     { return ${prefix_frozen}/bin/llvm-cpp-4.2 }
         }
     } elseif {$compiler eq "macports-g95"} {
         switch $type {
             fc      -
             f77     -
-            f90     { return ${prefix}/bin/g95 }
+            f90     { return ${prefix_frozen}/bin/g95 }
         }
     } elseif {[regexp {^macports-(mpich|openmpi|mpich-devel|openmpi-devel)-clang$} $compiler -> mpi]} {
         switch $type {
             cc      -
-            objc    { return ${prefix}/bin/mpicc-${mpi}-clang }
+            objc    { return ${prefix_frozen}/bin/mpicc-${mpi}-clang }
             cxx     -
-            objcxx  { return ${prefix}/bin/mpicxx-${mpi}-clang }
+            objcxx  { return ${prefix_frozen}/bin/mpicxx-${mpi}-clang }
         }
     } elseif {[regexp {^macports-(mpich|openmpi|mpich-devel|openmpi-devel)-clang-(\d+\.\d+)$} $compiler -> mpi version]} {
         set suffix [join [split ${version} .] ""]
         switch $type {
             cc      -
-            objc    { return ${prefix}/bin/mpicc-${mpi}-clang${suffix} }
+            objc    { return ${prefix_frozen}/bin/mpicc-${mpi}-clang${suffix} }
             cxx     -
-            objcxx  { return ${prefix}/bin/mpicxx-${mpi}-clang${suffix} }
-            cpp     { return ${prefix}/bin/clang-cpp-mp-${version} }
+            objcxx  { return ${prefix_frozen}/bin/mpicxx-${mpi}-clang${suffix} }
+            cpp     { return ${prefix_frozen}/bin/clang-cpp-mp-${version} }
         }
     } elseif {[regexp {^macports-(mpich|openmpi|mpich-devel|openmpi-devel)-gcc-(\d+(?:\.\d+)?)$} $compiler -> mpi version]} {
         set suffix [join [split ${version} .] ""]
         switch $type {
             cc      -
-            objc    { return ${prefix}/bin/mpicc-${mpi}-gcc${suffix} }
+            objc    { return ${prefix_frozen}/bin/mpicc-${mpi}-gcc${suffix} }
             cxx     -
-            objcxx  { return ${prefix}/bin/mpicxx-${mpi}-gcc${suffix} }
-            cpp     { return ${prefix}/bin/cpp-mp-${version} }
+            objcxx  { return ${prefix_frozen}/bin/mpicxx-${mpi}-gcc${suffix} }
+            cpp     { return ${prefix_frozen}/bin/cpp-mp-${version} }
             fc      -
             f77     -
-            f90     { return ${prefix}/bin/mpifort-${mpi}-gcc${suffix} }
+            f90     { return ${prefix_frozen}/bin/mpifort-${mpi}-gcc${suffix} }
         }
     } elseif {[regexp {^macports-(mpich|openmpi|mpich-devel|openmpi-devel)-default$} $compiler -> mpi]} {
         switch $type {
             cc      -
-            objc    { return ${prefix}/bin/mpicc-${mpi}-mp }
+            objc    { return ${prefix_frozen}/bin/mpicc-${mpi}-mp }
             cxx     -
-            objcxx  { return ${prefix}/bin/mpicxx-${mpi}-mp }
+            objcxx  { return ${prefix_frozen}/bin/mpicxx-${mpi}-mp }
         }
     }
     # Fallbacks
@@ -1407,6 +1493,11 @@ proc portconfigure::add_compiler_port_dependencies {compiler} {
                 depends_lib-delete "port:libcxx"
                 depends_lib-append "port:libcxx"
             }
+            if {[option compiler.openmp_version] ne ""} {
+                ui_debug "Adding depends_lib port:libomp"
+                depends_lib-delete "port:libomp"
+                depends_lib-append "port:libomp"
+            }
         }
     }
 
@@ -1432,32 +1523,34 @@ proc portconfigure::configure_main {args} {
         global configure.${flags} configure.universal_${flags}
     }
 
+    set callback [list "-callback" portprogress::target_progress_callback]
+
     if {[tbool use_autoreconf]} {
-        if {[catch {command_exec autoreconf} result]} {
+        if {[catch {command_exec {*}${callback} autoreconf} result]} {
             return -code error "[format [msgcat::mc "%s failure: %s"] autoreconf $result]"
         }
     }
 
     if {[tbool use_automake]} {
-        if {[catch {command_exec automake} result]} {
+        if {[catch {command_exec {*}${callback} automake} result]} {
             return -code error "[format [msgcat::mc "%s failure: %s"] automake $result]"
         }
     }
 
     if {[tbool use_autoconf]} {
-        if {[catch {command_exec autoconf} result]} {
+        if {[catch {command_exec {*}${callback} autoconf} result]} {
             return -code error "[format [msgcat::mc "%s failure: %s"] autoconf $result]"
         }
     }
 
     if {[tbool use_xmkmf]} {
         parse_environment xmkmf
-        if {[catch {command_exec xmkmf} result]} {
+        if {[catch {command_exec {*}${callback} xmkmf} result]} {
             return -code error "[format [msgcat::mc "%s failure: %s"] xmkmf $result]"
         }
 
         parse_environment xmkmf
-        if {[catch {command_exec "cd ${worksrcpath} && make Makefiles" -varprefix xmkmf} result]} {
+        if {[catch {command_exec {*}${callback} "cd ${worksrcpath} && make Makefiles" -varprefix xmkmf} result]} {
             return -code error "[format [msgcat::mc "%s failure: %s"] "make Makefiles" $result]"
         }
     } elseif {[tbool use_configure]} {
@@ -1514,7 +1607,7 @@ proc portconfigure::configure_main {args} {
         }
 
         # add SDK flags if cross-compiling (or universal on ppc tiger)
-        if {${configure.sdkroot} ne ""} {
+        if {${configure.sdkroot} ne "" && ![option compiler.limit_flags]} {
             foreach env_var {CPPFLAGS CFLAGS CXXFLAGS OBJCFLAGS OBJCXXFLAGS} {
                 append_to_environment_value configure $env_var -isysroot${configure.sdkroot}
             }
@@ -1547,7 +1640,7 @@ proc portconfigure::configure_main {args} {
         }
 
         # Execute the command (with the new environment).
-        if {[catch {command_exec configure} result]} {
+        if {[catch {command_exec {*}${callback} configure} result]} {
             global configure.dir
             if {[file exists ${configure.dir}/config.log]} {
                 ui_error "[format [msgcat::mc "Failed to configure %s, consult %s/config.log"] [option subport] ${configure.dir}]"

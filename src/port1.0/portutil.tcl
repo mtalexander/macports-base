@@ -368,33 +368,55 @@ proc command_string {command} {
 }
 
 # Given a command name, execute it with the options.
-# command_exec command [-notty] [-varprefix variable_prefix] [command_prefix [command_suffix]]
+# command_exec [-notty] [-callback proc] [-varprefix variable_prefix] command [command_prefix [command_suffix]]
 # command           name of the command
 # variable_prefix   name of the variable prefix to use (defaults to command)
 # command_prefix    additional command prefix (typically pipe command)
 # command_suffix    additional command suffix (typically redirection)
-proc command_exec {command args} {
-    set varprefix "${command}"
+proc command_exec {args} {
+    set callback ""
     set notty ""
     set command_prefix ""
     set command_suffix ""
 
-    if {[llength $args] > 0} {
-        if {[lindex $args 0] eq "-notty"} {
-            set notty "-notty"
-            set args [lrange $args 1 end]
-        }
-
-        if {[lindex $args 0] eq "-varprefix"} {
-            set varprefix [lindex $args 1]
-            set args [lrange $args 2 end]
-        }
-
-        if {[llength $args] > 0} {
-            set command_prefix [lindex $args 0]
-            if {[llength $args] > 1} {
-                set command_suffix [lindex $args 1]
+    while {[llength $args] > 0} {
+        switch -glob -- [lindex $args 0] {
+            -notty {
+                set notty "-notty"
+                set args [lrange $args 1 end]
             }
+            -callback {
+                set callback [lrange $args 0 1]
+                set args [lrange $args 2 end]
+            }
+            -varprefix {
+                set varprefix [lindex $args 1]
+                set args [lrange $args 2 end]
+            }
+            -* {
+                return -code error "unknown option [lindex $args 0]"
+            }
+            -- {
+                set args [lrange $args 1 end]
+                break
+            }
+            default {
+                break
+            }
+        }
+    }
+
+    if {[llength $args] == 0} {
+        return -code error "Missing command argument"
+    }
+
+    set command [lindex $args 0]
+    set varprefix "${command}"
+
+    if {[llength $args] > 1} {
+        set command_prefix [lindex $args 1]
+        if {[llength $args] > 2} {
+            set command_suffix [lindex $args 2]
         }
     }
 
@@ -417,8 +439,10 @@ proc command_exec {command args} {
     if {[option macosx_deployment_target] ne ""} {
         set ${varprefix}.env_array(MACOSX_DEPLOYMENT_TARGET) [option macosx_deployment_target]
     }
-    set ${varprefix}.env_array(CC_PRINT_OPTIONS) "YES"
-    set ${varprefix}.env_array(CC_PRINT_OPTIONS_FILE) [file join [option workpath] ".CC_PRINT_OPTIONS"]
+    if {[option compiler.log_verbose_output]} {
+        set ${varprefix}.env_array(CC_PRINT_OPTIONS) "YES"
+        set ${varprefix}.env_array(CC_PRINT_OPTIONS_FILE) [file join [option workpath] ".CC_PRINT_OPTIONS"]
+    }
     if {[option compiler.cpath] ne ""} {
         set ${varprefix}.env_array(CPATH) [join [option compiler.cpath] :]
     }
@@ -451,7 +475,7 @@ proc command_exec {command args} {
     # Call the command.
     set fullcmdstring "$command_prefix $cmdstring $command_suffix"
     ui_info "Executing: $fullcmdstring"
-    set code [catch {system {*}$notty {*}$nice $fullcmdstring} result]
+    set code [catch {system {*}$notty {*}$callback {*}$nice $fullcmdstring} result]
     # Save variables in order to re-throw the same error code.
     set errcode $::errorCode
     set errinfo $::errorInfo
@@ -1319,7 +1343,7 @@ set ports_dry_last_skipped ""
 proc target_run {ditem} {
     global target_state_fd workpath portpath ports_trace PortInfo ports_dryrun \
            ports_dry_last_skipped worksrcpath subport env portdbpath \
-           macosx_version prefix
+           macosx_version prefix_frozen
     set portname $subport
     set result 0
     set skipped 0
@@ -1465,7 +1489,7 @@ proc target_run {ditem} {
                     }
 
                     # Add ccache port for access to ${prefix}/bin/ccache binary if it exists
-                    if {[option configure.ccache] && [file exists ${prefix}/bin/ccache]} {
+                    if {[option configure.ccache] && [file exists ${prefix_frozen}/bin/ccache]} {
                         set name [_get_dep_port path:bin/ccache:ccache]
                         lappend deplist $name
                         set deplist [recursive_collect_deps $name $deplist]
@@ -3239,7 +3263,7 @@ proc check_supported_archs {} {
 
 # check if the installed xcode version is new enough
 proc _check_xcode_version {} {
-    global os.subplatform macosx_version xcodeversion use_xcode subport
+    global os.subplatform os.major macosx_version xcodeversion use_xcode subport
 
     if {${os.subplatform} eq "macosx"} {
         switch $macosx_version {
@@ -3300,13 +3324,13 @@ proc _check_xcode_version {} {
             }
             10.15 {
                 set min 11.0
-                set ok 11.0
-                set rec 11.0
+                set ok 11.3
+                set rec 11.3
             }
             default {
                 set min 11.0
-                set ok 11.0
-                set rec 11.0
+                set ok 11.3
+                set rec 11.3
             }
         }
         if {$xcodeversion eq "none"} {
@@ -3325,7 +3349,7 @@ proc _check_xcode_version {} {
             ui_warn "The installed version of Xcode (${xcodeversion}) is known to cause problems. Version $rec or later is recommended on macOS ${macosx_version}."
         }
 
-        # Xcode 4.3 and above requires the command-line utilities package to be installed. 
+        # Xcode 4.3 and above requires the command-line utilities package to be installed.
         if {[vercmp $xcodeversion 4.3] >= 0 || ($xcodeversion eq "none" && [file exists "/Applications/Xcode.app"])} {
             if {[vercmp $macosx_version 10.9] >= 0} {
                 # on Mavericks, /usr/bin/make might always installed as a shim into the command line tools installer.
@@ -3337,14 +3361,23 @@ proc _check_xcode_version {} {
             }
 
             # Check whether /usr/include and /usr/bin/make exist and tell users to install the command line tools, if they don't
-            if {[vercmp $xcodeversion 9.3] < 0 && (![file isdirectory [file join $cltpath usr include]] || ![file executable  [file join $cltpath usr bin make]])} {
-                ui_warn "System headers do not appear to be installed. Most ports should build correctly, but if you experience problems due to a port depending on system headers, please file a ticket at https://trac.macports.org."
+            if {${os.major} <= 17 && (![file isdirectory [file join $cltpath usr include]] || ![file executable  [file join $cltpath usr bin make]])} {
+                if {[vercmp $xcodeversion 10.0] >= 0} {
+                    ui_warn "System headers do not appear to be installed. Ports may not build correctly due to Xcode 10 only providing a 10.14 SDK."
+                } else {
+                    ui_warn "System headers do not appear to be installed. Most ports should build correctly, but if you experience problems due to a port depending on system headers, please file a ticket at https://trac.macports.org."
+                }
                 if {[vercmp $macosx_version 10.9] >= 0} {
                     ui_warn "You can install them as part of the Xcode Command Line Tools package by running `xcode-select --install'."
                 } else {
                     ui_warn "You can install them as part of the Xcode Command Line Tools package from Xcode's Preferences in the Downloads section."
                     ui_warn "See https://guide.macports.org/chunked/installing.xcode.html#installing.xcode.lion.43 for more information."
                 }
+            }
+
+            if {${os.major} >= 18 && [file tail [option configure.sdkroot]] ne "MacOSX[option configure.sdk_version].sdk"} {
+                ui_warn "The macOS [option configure.sdk_version] SDK does not appear to be installed. Ports may not build correctly."
+                ui_warn "You can install it as part of the Xcode Command Line Tools package by running `xcode-select --install'."
             }
 
             # Check whether users have agreed to the Xcode license agreement
