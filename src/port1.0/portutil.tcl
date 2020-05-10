@@ -2560,7 +2560,7 @@ proc set_ui_prefix {} {
 
 # Use a specified group/version.
 proc PortGroup {group version} {
-    global porturl PortInfo _portgroup_search_dirs
+    global porturl PortInfo _portgroup_search_dirs subport
 
     if {[info exists _portgroup_search_dirs]} {
         foreach dir $_portgroup_search_dirs {
@@ -2581,8 +2581,8 @@ proc PortGroup {group version} {
         uplevel "source $groupFile"
         ui_debug "Sourcing PortGroup $group $version from $groupFile"
     } else {
-        lappend PortInfo(portgroups) [list $group $version ""]
-        ui_warn "PortGroup ${group} ${version} could not be located. ${group}-${version}.tcl does not exist."
+        ui_error "${subport}: PortGroup ${group} ${version} could not be located. ${group}-${version}.tcl does not exist."
+        return -code error "PortGroup not found"
     }
 }
 
@@ -3325,12 +3325,12 @@ proc _check_xcode_version {} {
             10.15 {
                 set min 11.0
                 set ok 11.3
-                set rec 11.3
+                set rec 11.4.1
             }
             default {
                 set min 11.0
                 set ok 11.3
-                set rec 11.3
+                set rec 11.4.1
             }
         }
         if {$xcodeversion eq "none"} {
