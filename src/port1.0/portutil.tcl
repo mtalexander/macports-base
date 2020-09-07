@@ -2328,9 +2328,6 @@ proc adduser {name args} {
         ui_warn "adduser only works when running as root."
         ui_warn "The requested user '$name' was not created."
         return
-    } elseif {[geteuid] != 0} {
-        seteuid 0; setegid 0
-        set escalated 1
     }
 
     set passwd {*}
@@ -2349,6 +2346,11 @@ proc adduser {name args} {
 
     if {[existsuser ${name}] != -1 || [existsuser ${uid}] != -1} {
         return
+    }
+
+    if {[geteuid] != 0} {
+        seteuid 0; setegid 0
+        set escalated 1
     }
 
     if {${os.platform} eq "darwin"} {
@@ -2417,6 +2419,11 @@ proc adduser {name args} {
                     }
                 }
 
+                # drop privileges if they were escalated before
+                if {[info exists escalated]} {
+                    dropPrivileges
+                }
+
                 # and raise an error to abort
                 error "dscl failed to create required user $name."
             }
@@ -2439,9 +2446,6 @@ proc addgroup {name args} {
         ui_warn "addgroup only works when running as root."
         ui_warn "The requested group '$name' was not created."
         return
-    } elseif {[geteuid] != 0} {
-        seteuid 0; setegid 0
-        set escalated 1
     }
 
     set gid [nextgid]
@@ -2458,6 +2462,11 @@ proc addgroup {name args} {
 
     if {[existsgroup ${name}] != -1 || [existsgroup ${gid}] != -1} {
         return
+    }
+
+    if {[geteuid] != 0} {
+        seteuid 0; setegid 0
+        set escalated 1
     }
 
     if {${os.platform} eq "darwin"} {
@@ -2514,6 +2523,10 @@ proc addgroup {name args} {
                         ui_warn "failed to execute $dscl: $errName: $msg while trying to clean up failed creation of group $name."
                         ui_debug "dscl printed: $eMessage"
                     }
+                }
+
+                if {[info exists escalated]} {
+                    dropPrivileges
                 }
 
                 # and raise an error to abort
@@ -2878,7 +2891,7 @@ proc merge {base} {
 
     # traverse the base-architecture directory
     set basepath "${base}/${base_arch}"
-    fs-traverse file "${basepath}" {
+    fs-traverse file [list $basepath] {
         set fpath [string range "${file}" [string length "${basepath}"] [string length "${file}"]]
         if {${fpath} ne ""} {
             # determine the type (dir/file/link)
@@ -2935,7 +2948,7 @@ proc chown {path user} {
     lchown $path $user
 
     if {[file isdirectory $path]} {
-        fs-traverse myfile ${path} {
+        fs-traverse myfile [list $path] {
             lchown $myfile $user
         }
     }
@@ -3325,12 +3338,12 @@ proc _check_xcode_version {} {
             10.15 {
                 set min 11.0
                 set ok 11.3
-                set rec 11.4.1
+                set rec 11.6
             }
             default {
                 set min 11.0
                 set ok 11.3
-                set rec 11.4.1
+                set rec 11.6
             }
         }
         if {$xcodeversion eq "none"} {
@@ -3375,7 +3388,7 @@ proc _check_xcode_version {} {
                 }
             }
 
-            if {${os.major} >= 18 && [file tail [option configure.sdkroot]] ne "MacOSX[option configure.sdk_version].sdk"} {
+            if {${os.major} >= 18 && [option configure.sdk_version] ne "" && [file tail [option configure.sdkroot]] ne "MacOSX[option configure.sdk_version].sdk"} {
                 ui_warn "The macOS [option configure.sdk_version] SDK does not appear to be installed. Ports may not build correctly."
                 ui_warn "You can install it as part of the Xcode Command Line Tools package by running `xcode-select --install'."
             }

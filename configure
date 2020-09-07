@@ -6005,6 +6005,7 @@ else
 
 
 					#include <IOKit/IOKitLib.h>
+					#include <IOKit/pwr_mgt/IOPMLib.h>
 
 int
 main ()
@@ -6420,8 +6421,11 @@ fi
 			10.[0-5]*)
 				UNIVERSAL_ARCHS="i386 ppc"
 			;;
-			*)
+			10.[6-9]*)
 				UNIVERSAL_ARCHS="x86_64 i386"
+			;;
+			*)
+				UNIVERSAL_ARCHS="arm64 x86_64"
 			;;
 		esac
 	fi
@@ -6856,7 +6860,7 @@ done
 # Checks for library functions.
 for ac_func in OSAtomicCompareAndSwap32 OSAtomicCompareAndSwap64 \
 	OSAtomicCompareAndSwapPtr __getdirentries64 clearenv copyfile \
-	flock fls kqueue posix_spawn setmode \
+	_dyld_shared_cache_contains_path flock fls kqueue posix_spawn setmode \
 	sysctlbyname
 do :
   as_ac_var=`$as_echo "ac_cv_func_$ac_func" | $as_tr_sh`
@@ -7720,6 +7724,14 @@ ac_abs_srcdir=$ac_abs_top_srcdir$ac_dir_suffix
 		{ $as_echo "$as_me:${as_lineno-$LINENO}: === configuring in $ac_dir ($mp_popdir/$ac_dir)" >&5
 $as_echo "$as_me: === configuring in $ac_dir ($mp_popdir/$ac_dir)" >&6;}
 		if test -f "$ac_srcdir/configure"; then
+			# Run 'make distclean' first, ignoring errors; unfortunately some
+			# of our projects are not reconfigure-safe and will not correctly
+			# pick up modified configure variables or recompile files affected
+			# by such variables. See
+			# https://github.com/macports/macports-base/pull/79 and
+			# https://github.com/macports/macports-base/pull/80
+			make distclean || true
+
 			mp_sub_configure_args=
 			mp_sub_configure_keys=
 			# Compile a list of keys that have been given to the MP_CONFIG_SUBDIR
@@ -8038,6 +8050,14 @@ ac_abs_srcdir=$ac_abs_top_srcdir$ac_dir_suffix
 		{ $as_echo "$as_me:${as_lineno-$LINENO}: === configuring in $ac_dir ($mp_popdir/$ac_dir)" >&5
 $as_echo "$as_me: === configuring in $ac_dir ($mp_popdir/$ac_dir)" >&6;}
 		if test -f "$ac_srcdir/configure"; then
+			# Run 'make distclean' first, ignoring errors; unfortunately some
+			# of our projects are not reconfigure-safe and will not correctly
+			# pick up modified configure variables or recompile files affected
+			# by such variables. See
+			# https://github.com/macports/macports-base/pull/79 and
+			# https://github.com/macports/macports-base/pull/80
+			make distclean || true
+
 			mp_sub_configure_args=
 			mp_sub_configure_keys=
 			# Compile a list of keys that have been given to the MP_CONFIG_SUBDIR
@@ -8351,6 +8371,14 @@ ac_abs_srcdir=$ac_abs_top_srcdir$ac_dir_suffix
 		{ $as_echo "$as_me:${as_lineno-$LINENO}: === configuring in $ac_dir ($mp_popdir/$ac_dir)" >&5
 $as_echo "$as_me: === configuring in $ac_dir ($mp_popdir/$ac_dir)" >&6;}
 		if test -f "$ac_srcdir/configure"; then
+			# Run 'make distclean' first, ignoring errors; unfortunately some
+			# of our projects are not reconfigure-safe and will not correctly
+			# pick up modified configure variables or recompile files affected
+			# by such variables. See
+			# https://github.com/macports/macports-base/pull/79 and
+			# https://github.com/macports/macports-base/pull/80
+			make distclean || true
+
 			mp_sub_configure_args=
 			mp_sub_configure_keys=
 			# Compile a list of keys that have been given to the MP_CONFIG_SUBDIR
@@ -8666,6 +8694,14 @@ ac_abs_srcdir=$ac_abs_top_srcdir$ac_dir_suffix
 		{ $as_echo "$as_me:${as_lineno-$LINENO}: === configuring in $ac_dir ($mp_popdir/$ac_dir)" >&5
 $as_echo "$as_me: === configuring in $ac_dir ($mp_popdir/$ac_dir)" >&6;}
 		if test -f "$ac_srcdir/configure"; then
+			# Run 'make distclean' first, ignoring errors; unfortunately some
+			# of our projects are not reconfigure-safe and will not correctly
+			# pick up modified configure variables or recompile files affected
+			# by such variables. See
+			# https://github.com/macports/macports-base/pull/79 and
+			# https://github.com/macports/macports-base/pull/80
+			make distclean || true
+
 			mp_sub_configure_args=
 			mp_sub_configure_keys=
 			# Compile a list of keys that have been given to the MP_CONFIG_SUBDIR

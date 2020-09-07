@@ -2062,10 +2062,16 @@ proc action_info { action portlist opts } {
             foreach depends_option $all_depends_options {
                 set options($depends_option) yes
             }
-            # insert the expanded options into the ordering info
-            set order_pos [lsearch -exact $global_options(options_${action}_order) ports_info_depends]
-            set global_options(options_${action}_order) [lreplace $global_options(options_${action}_order) \
-                $order_pos $order_pos {*}$all_depends_options]
+            # replace all occurrences of --depends with the expanded options
+            while 1 {
+                set order_pos [lsearch -exact $global_options(options_${action}_order) ports_info_depends]
+                if {$order_pos != -1} {
+                    set global_options(options_${action}_order) [lreplace $global_options(options_${action}_order) \
+                        $order_pos $order_pos {*}$all_depends_options]
+                } else {
+                    break
+                }
+            }
         }
 
         # Set up our field separators
@@ -4133,6 +4139,17 @@ proc action_target { action portlist opts } {
             set porturl $portinfo(porturl)
         }
 
+        # If version was specified, it can be a version glob for use
+        # with the clean action. For other actions, error out if we're
+        # being asked for a version we can't provide.
+        if {[string length $portversion]} {
+            if {$action eq "clean"} {
+                set options(ports_version_glob) $portversion
+            } elseif {$portversion ne "$portinfo(version)_$portinfo(revision)" && $portversion ne $portinfo(version)} {
+                break_softcontinue "$portname version $portversion is not available (current version is $portinfo(version)_$portinfo(revision))" 1 status
+            }
+        }
+
         # use existing variants iff none were explicitly requested
         if {[array get requested_variations] eq "" && [array get variations] ne ""} {
             array unset requested_variations
@@ -4147,11 +4164,6 @@ proc action_target { action portlist opts } {
             }
         }
 
-        # If version was specified, save it as a version glob for use
-        # in port actions (e.g. clean).
-        if {[string length $portversion]} {
-            set options(ports_version_glob) $portversion
-        }
         # if installing, mark the port as explicitly requested
         if {$action eq "install"} {
             if {![info exists options(ports_install_unrequested)]} {

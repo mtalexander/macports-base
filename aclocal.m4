@@ -125,6 +125,14 @@ AC_DEFUN([MP_CONFIG_SUBDIR], [
 	if test "$no_recursion" != yes || test ! -f "$ac_srcdir/config.status"; then
 		AC_MSG_NOTICE([=== configuring in $ac_dir ($mp_popdir/$ac_dir)])
 		if test -f "$ac_srcdir/configure"; then
+			# Run 'make distclean' first, ignoring errors; unfortunately some
+			# of our projects are not reconfigure-safe and will not correctly
+			# pick up modified configure variables or recompile files affected
+			# by such variables. See
+			# https://github.com/macports/macports-base/pull/79 and
+			# https://github.com/macports/macports-base/pull/80
+			make distclean || true
+
 			mp_sub_configure_args=
 			mp_sub_configure_keys=
 			# Compile a list of keys that have been given to the MP_CONFIG_SUBDIR
@@ -488,6 +496,7 @@ AC_DEFUN(MP_CHECK_FRAMEWORK_IOKIT, [
 		AC_LINK_IFELSE([
 			AC_LANG_PROGRAM([
 					#include <IOKit/IOKitLib.h>
+					#include <IOKit/pwr_mgt/IOPMLib.h>
 				], [
 					IOCreateReceivePort(0, NULL);
 					IORegisterForSystemPower(0, NULL, NULL, NULL);
@@ -764,8 +773,11 @@ AC_DEFUN([MP_UNIVERSAL_OPTIONS],[
 			10.[[0-5]]*)
 				UNIVERSAL_ARCHS="i386 ppc"
 			;;
-			*)
+			10.[[6-9]]*)
 				UNIVERSAL_ARCHS="x86_64 i386"
+			;;
+			*)
+				UNIVERSAL_ARCHS="arm64 x86_64"
 			;;
 		esac
 	fi

@@ -52,6 +52,7 @@
 #include <strings.h>
 
 #ifdef __MACH__
+#include <mach-o/dyld.h>
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
 
@@ -465,6 +466,11 @@ int macho_parse_file(macho_handle_t *handle, const char *filepath, const macho_t
     
     /* Open input file */
     if ((fd = open(filepath, O_RDONLY)) < 0) {
+#ifdef HAVE__DYLD_SHARED_CACHE_CONTAINS_PATH
+        if (_dyld_shared_cache_contains_path(filepath)) {
+            return MACHO_ECACHE;
+        }
+#endif /* HAVE__DYLD_SHARED_CACHE_CONTAINS_PATH */
         return MACHO_EFILE;
     }
 
@@ -559,6 +565,7 @@ const char *macho_strerror(int err) {
         /* 0x04 */ "Error allocating memory",
         /* 0x08 */ "Premature end of data, possibly corrupt file",
         /* 0x10 */ "Not a Mach-O file",
+        /* 0x20 */ "Shared cache only",
     };
     return errors[num];
 }

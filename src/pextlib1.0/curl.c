@@ -170,6 +170,11 @@ CurlFetchCmd(Tcl_Interp* interp, int objc, Tcl_Obj* CONST objv[])
 	FILE* theFile = NULL;
 	char theErrorString[CURL_ERROR_SIZE];
 
+	/* Always 0-initialize the error string, since older curl versions may not
+	 * initialize the error string buffer at all. See
+	 * https://trac.macports.org/ticket/60581. */
+	theErrorString[0] = '\0';
+
 	do {
 		int noprogress = 1;
 		int useepsv = 1;
@@ -254,14 +259,14 @@ CurlFetchCmd(Tcl_Interp* interp, int objc, Tcl_Obj* CONST objv[])
 				/* check we also have the parameter */
 				if (optioncrsr < lastoption) {
 					optioncrsr++;
-					if ( numHTTPHeaders < MAXHTTPHEADERS ) {
-					  httpHeaders[numHTTPHeaders++] = Tcl_GetString(objv[optioncrsr]);
+					if (numHTTPHeaders < MAXHTTPHEADERS) {
+						httpHeaders[numHTTPHeaders++] = Tcl_GetString(objv[optioncrsr]);
 					} else {
-					  Tcl_SetResult(interp,
-					    "curl fetch: Too many --append-http-header options",
-					    TCL_STATIC);
-					  theResult = TCL_ERROR;
-					  break;
+						Tcl_SetResult(interp,
+							"curl fetch: Too many --append-http-header options",
+							TCL_STATIC);
+						theResult = TCL_ERROR;
+						break;
 					}
 				} else {
 					Tcl_SetResult(interp,
@@ -512,8 +517,8 @@ CurlFetchCmd(Tcl_Interp* interp, int objc, Tcl_Obj* CONST objv[])
 		/* Clear the Pragma: no-cache header */
 		headers = curl_slist_append(headers, "Pragma:");
 		/* Append any optional headers */
- 		for ( int iH = 0; iH < numHTTPHeaders; ++iH ) {
-		  headers = curl_slist_append(headers, httpHeaders[iH]);
+		for (int iH = 0; iH < numHTTPHeaders; ++iH) {
+			headers = curl_slist_append(headers, httpHeaders[iH]);
 		}
 		theCurlCode = curl_easy_setopt(theHandle, CURLOPT_HTTPHEADER, headers);
 		if (theCurlCode != CURLE_OK) {
@@ -645,8 +650,21 @@ CurlFetchCmd(Tcl_Interp* interp, int objc, Tcl_Obj* CONST objv[])
 		}
 		
 		if (info->data.result != CURLE_OK) {
-			/* execution failed, use the error string */
-			Tcl_SetResult(interp, theErrorString, TCL_VOLATILE);
+			/* execution failed, use the error string if it is set */
+			if (theErrorString[0] != '\0') {
+				Tcl_SetResult(interp, theErrorString, TCL_VOLATILE);
+			} else {
+				/* When the error buffer does not hold useful information,
+				 * generate our own message. Use a larger buffer since we add
+				 * a significant amount of text. */
+				char errbuf[256 + CURL_ERROR_SIZE];
+				snprintf(errbuf, sizeof(errbuf),
+					"curl_multi_info_read() returned {.msg = CURLMSG_DONE, "
+					".data.result = %d (!= CURLE_OK)}, but the error buffer "
+					"is not set. curl_easy_strerror(.data.result): %s",
+					info->data.result, curl_easy_strerror(info->data.result));
+				Tcl_SetResult(interp, errbuf, TCL_VOLATILE);
+			}
 			theResult = TCL_ERROR;
 			break;
 		}
