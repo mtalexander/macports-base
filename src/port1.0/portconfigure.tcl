@@ -447,7 +447,7 @@ proc portconfigure::choose_supported_archs {archs} {
         # No SDK version (maybe not on macOS)
         set intersection_archs $supported_archs
     }
-    set ret {}
+    set ret [list]
     # Filter out unsupported archs, but allow demoting to 32-bit if needed.
     # That means if build_arch is x86_64 it's still possible to build a port
     # that sets supported_archs to "i386 ppc" if the SDK allows it.
@@ -860,6 +860,7 @@ proc portconfigure::get_min_command_line {compiler} {
                     # macOS has supported thread-local storage since Mac OS X Lion.
                     # So __thread (GNU extension) and _Thread_local (C11) could be used.
                     # However, the C++11 keyword was not supported until Xcode 8
+                    #    (https://developer.apple.com/library/archive/releasenotes/DeveloperTools/RN-Xcode/Chapters/Introduction.html#//apple_ref/doc/uid/TP40001051-CH1-SW127)
                     #    (https://developer.apple.com/videos/play/wwdc2016-405/?time=354).
                     set min_value [max_version $min_value 800.0.38]
                 } else {
