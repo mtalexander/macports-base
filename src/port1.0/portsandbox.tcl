@@ -45,7 +45,7 @@ default portsandbox_profile {}
 proc portsandbox::set_profile {target} {
     global os.major portsandbox_profile workpath distpath \
         package.destpath configure.ccache ccache_dir \
-        sandbox_network configure.distcc porttrace prefix
+        sandbox_network configure.distcc porttrace prefix_frozen
 
     switch $target {
         activate -
@@ -104,9 +104,12 @@ proc portsandbox::set_profile {target} {
 
     # If ${prefix} is own its own volume, grant access to its
     # temporary items directory, used by Xcode tools
-    set mountpoint [get_mountpoint ${prefix}]
+    if {[catch {get_mountpoint ${prefix_frozen}} mountpoint]} {
+        ui_debug "get_mountpoint failed: $mountpoint"
+        set mountpoint /
+    }
 
-    if {$mountpoint != "/"} {
+    if {$mountpoint ne "/"} {
         set extradir [file join $mountpoint ".TemporaryItems"]
 
         if {[file isdirectory $extradir]} {
