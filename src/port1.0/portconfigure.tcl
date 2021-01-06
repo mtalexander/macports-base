@@ -33,11 +33,13 @@
 package provide portconfigure 1.0
 package require portutil 1.0
 package require portprogress 1.0
+package require struct::set
 
 set org.macports.configure [target_new org.macports.configure portconfigure::configure_main]
 target_provides ${org.macports.configure} configure
 target_requires ${org.macports.configure} main fetch checksum extract patch
 target_prerun ${org.macports.configure} portconfigure::configure_start
+target_postrun ${org.macports.configure} portconfigure::configure_finish
 
 namespace eval portconfigure {
 }
@@ -408,7 +410,7 @@ proc portconfigure::choose_supported_archs {archs} {
 
     if {${configure.sdk_version} ne ""} {
         # Figure out which archs are supported by the SDK
-        if {[vercmp ${configure.sdk_version} 11.0] >= 0} {
+        if {[vercmp ${configure.sdk_version} 11] >= 0} {
             set sdk_archs [list arm64 x86_64]
         } elseif {[vercmp ${configure.sdk_version} 10.14] >= 0} {
             set sdk_archs x86_64
@@ -448,16 +450,20 @@ proc portconfigure::choose_supported_archs {archs} {
         set intersection_archs $supported_archs
     }
     set ret [list]
-    # Filter out unsupported archs, but allow demoting to 32-bit if needed.
-    # That means if build_arch is x86_64 it's still possible to build a port
+    # Filter out unsupported archs, but allow demoting to another arch
+    # supported by the SDK if needed, e.g. 64-bit to 32-bit. That means
+    # e.g. if build_arch is x86_64 it's still possible to build a port
     # that sets supported_archs to "i386 ppc" if the SDK allows it.
+    array set arch_demotions [list \
+                                arm64 x86_64 \
+                                x86_64 i386 \
+                                ppc64 ppc \
+                                i386 ppc]
     foreach arch $archs {
         if {$arch in $intersection_archs} {
             set add_arch $arch
-        } elseif {$arch eq "x86_64" && "i386" in $intersection_archs} {
-            set add_arch "i386"
-        } elseif {$arch eq "ppc64" && "ppc" in $intersection_archs} {
-            set add_arch "ppc"
+        } elseif {[info exists arch_demotions($arch)] && $arch_demotions($arch) in $intersection_archs} {
+            set add_arch $arch_demotions($arch)
         } else {
             continue
         }
@@ -503,8 +509,16 @@ proc portconfigure::configure_get_ld_archflags {} {
     }
 }
 
+# find a "close enough" match for the given sdk_version in sdk_path
+proc portconfigure::find_close_sdk {sdk_version sdk_path} {
+    # only works right for versions >= 11, which is all we need
+    set sdk_major [lindex [split $sdk_version .] 0]
+    set sdks [glob -nocomplain -directory $sdk_path MacOSX${sdk_major}*.sdk]
+    return [lindex [lsort -command vercmp $sdks] 0]
+}
+
 proc portconfigure::configure_get_sdkroot {sdk_version} {
-    global developer_dir macosx_version xcodeversion os.arch os.major os.platform use_xcode
+    global developer_dir macos_version_major xcodeversion os.arch os.major os.platform use_xcode
 
     # This is only relevant for macOS
     if {${os.platform} ne "darwin"} {
@@ -512,33 +526,47 @@ proc portconfigure::configure_get_sdkroot {sdk_version} {
     }
 
     # Special hack for Tiger/ppc, since the system libraries do not contain intel slices
-    if {${os.arch} eq "powerpc" && $macosx_version eq "10.4" && [variant_exists universal] && [variant_isset universal]} {
+    if {${os.arch} eq "powerpc" && $macos_version_major eq "10.4" && [variant_exists universal] && [variant_isset universal]} {
         return ${developer_dir}/SDKs/MacOSX10.4u.sdk
     }
 
     # Use the DevSDK (eg: /usr/include) if present and the requested SDK version matches the host version
-    if {${os.major} < 19 && $sdk_version eq $macosx_version && [file exists /usr/include/sys/cdefs.h]} {
+    if {${os.major} < 19 && $sdk_version eq $macos_version_major && [file exists /usr/include/sys/cdefs.h]} {
         return {}
     }
 
+    set sdk_major [lindex [split $sdk_version .] 0]
     set cltpath /Library/Developer/CommandLineTools
     # Check CLT first if Xcode shouldn't be used
     if {![tbool use_xcode]} {
         set sdk ${cltpath}/SDKs/MacOSX${sdk_version}.sdk
         if {[file exists $sdk]} {
             return $sdk
+        } elseif {$sdk_major >= 11} {
+            # SDKs have minor versions as of macOS 11
+            set sdk [find_close_sdk $sdk_version ${cltpath}/SDKs]
+            if {$sdk ne ""} {
+                return $sdk
+            }
         }
 
-        if {[info exists ::portconfigure::sdkroot_cache(macosx${sdk_version})]} {
-            if {$::portconfigure::sdkroot_cache(macosx${sdk_version}) ne ""} {
-                return $::portconfigure::sdkroot_cache(macosx${sdk_version})
-            }
-            # negative result cached, do nothing here
-        } elseif {![catch {exec env DEVELOPER_DIR=${cltpath} xcrun --sdk macosx${sdk_version} --show-sdk-path 2> /dev/null} sdk]} {
-            set ::portconfigure::sdkroot_cache(macosx${sdk_version}) $sdk
-            return $sdk
+        if {$sdk_major >= 11 && $sdk_major == $macos_version_major} {
+            set try_versions [list ${sdk_major}.0 [option macos_version]]
         } else {
-            set ::portconfigure::sdkroot_cache(macosx${sdk_version}) ""
+            set try_versions [list $sdk_version]
+        }
+        foreach try_version $try_versions {
+            if {[info exists ::portconfigure::sdkroot_cache(macosx${try_version})]} {
+                if {$::portconfigure::sdkroot_cache(macosx${try_version}) ne ""} {
+                    return $::portconfigure::sdkroot_cache(macosx${try_version})
+                }
+                # negative result cached, do nothing here
+            } elseif {![catch {exec env DEVELOPER_DIR=${cltpath} xcrun --sdk macosx${try_version} --show-sdk-path 2> /dev/null} sdk]} {
+                set ::portconfigure::sdkroot_cache(macosx${try_version}) $sdk
+                return $sdk
+            } else {
+                set ::portconfigure::sdkroot_cache(macosx${try_version}) ""
+            }
         }
 
         # Fallback on "macosx"
@@ -574,23 +602,42 @@ proc portconfigure::configure_get_sdkroot {sdk_version} {
 
     if {[file exists $sdk]} {
         return $sdk
+    } elseif {$sdk_major >= 11} {
+        # SDKs have minor versions as of macOS 11
+        set sdk [find_close_sdk $sdk_version ${sdks_dir}]
+        if {$sdk ne ""} {
+            return $sdk
+        }
     }
 
-    if {[info exists ::portconfigure::sdkroot_cache(macosx${sdk_version},noclt)]} {
-        if {$::portconfigure::sdkroot_cache(macosx${sdk_version},noclt) ne ""} {
-            return $::portconfigure::sdkroot_cache(macosx${sdk_version},noclt)
-        }
-        # negative result cached, do nothing here
-    } elseif {![catch {exec xcrun --sdk macosx${sdk_version} --show-sdk-path 2> /dev/null} sdk]} {
-        set ::portconfigure::sdkroot_cache(macosx${sdk_version},noclt) $sdk
-        return $sdk
+    if {$sdk_major >= 11 && $sdk_major == $macos_version_major} {
+        set try_versions [list ${sdk_major}.0 [option macos_version]]
     } else {
-        set ::portconfigure::sdkroot_cache(macosx${sdk_version},noclt) ""
+        set try_versions [list $sdk_version]
+    }
+    foreach try_version $try_versions {
+        if {[info exists ::portconfigure::sdkroot_cache(macosx${try_version},noclt)]} {
+            if {$::portconfigure::sdkroot_cache(macosx${try_version},noclt) ne ""} {
+                return $::portconfigure::sdkroot_cache(macosx${try_version},noclt)
+            }
+            # negative result cached, do nothing here
+        } elseif {![catch {exec xcrun --sdk macosx${try_version} --show-sdk-path 2> /dev/null} sdk]} {
+            set ::portconfigure::sdkroot_cache(macosx${try_version},noclt) $sdk
+            return $sdk
+        } else {
+            set ::portconfigure::sdkroot_cache(macosx${try_version},noclt) ""
+        }
     }
 
     set sdk ${cltpath}/SDKs/MacOSX${sdk_version}.sdk
     if {[file exists $sdk]} {
         return $sdk
+    } elseif {$sdk_major >= 11} {
+        # SDKs have minor versions as of macOS 11
+        set sdk [find_close_sdk $sdk_version ${cltpath}/SDKs]
+        if {$sdk ne ""} {
+            return $sdk
+        }
     }
 
     set sdk ${sdks_dir}/MacOSX.sdk
@@ -614,7 +661,7 @@ proc portconfigure::configure_get_sdkroot {sdk_version} {
         return $sdk
     }
 
-    # We can get here if $sdk_version != $macosx_version on old OS versions
+    # We can get here if $sdk_version != $macos_version_major on old OS versions
     return {}
 }
 
@@ -873,7 +920,7 @@ proc portconfigure::get_min_command_line {compiler} {
             if {
                 ([option compiler.limit_flags] || [option compiler.support_environment_sdkroot]) &&
                 [option configure.sdkroot] ne "" &&
-                ![file exists /usr/lib/libxcselect.dylib]
+                !([file exists /usr/lib/libxcselect.dylib] || ${os.major} >= 20)
             } {
                 return none
             }
@@ -1718,4 +1765,81 @@ proc portconfigure::configure_main {args} {
         }
     }
     return 0
+}
+
+options configure.checks.implicit_function_declaration \
+        configure.checks.implicit_function_declaration.whitelist
+default configure.checks.implicit_function_declaration yes
+default configure.checks.implicit_function_declaration.whitelist {[portconfigure::load_implicit_function_declaration_whitelist ${configure.sdk_version}]}
+
+proc portconfigure::check_implicit_function_declarations {} {
+    global \
+        configure.dir \
+        configure.checks.implicit_function_declaration.whitelist
+
+    # Map from function name to config.log that used it without declaration
+    array set undeclared_functions {}
+
+    fs-traverse -tails file [list ${configure.dir}] {
+        if {[file tail $file] eq "config.log" && [file isfile [file join ${configure.dir} $file]]} {
+            # We could do the searching ourselves, but using a tool optimized for this purpose is likely much faster
+            # than using Tcl.
+            #
+            # Using /usr/bin/fgrep here, so we don't accidentally pick up a macports-installed grep which might
+            # currently not be runnable due to a missing library.
+            set args [list "/usr/bin/fgrep" "--" "-Wimplicit-function-declaration"]
+            lappend args [file join ${configure.dir} $file]
+
+            if {![catch {set result [exec -- {*}$args]}]} {
+                foreach line [split $result "\n"] {
+                    if {[regexp -- "(?:implicit declaration of function|implicitly declaring library function) '(\[^']+)'" $line -> function]} {
+                        set is_whitelisted no
+                        foreach whitelisted ${configure.checks.implicit_function_declaration.whitelist} {
+                            if {[string match -nocase $whitelisted $function]} {
+                                set is_whitelisted yes
+                                break
+                            }
+                        }
+                        if {!$is_whitelisted} {
+                            ::struct::set include undeclared_functions($function) $file
+                        } else {
+                            ui_debug [format "Ignoring implicit declaration of function '%s' because it is whitelisted" $function]
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if {[array size undeclared_functions] > 0} {
+        ui_warn "Configuration logfiles contain indications of -Wimplicit-function-declaration; check that features were not accidentally disabled:"
+        foreach {function files} [array get undeclared_functions] {
+            ui_msg [format "  %s: found in %s" $function [join $files ", "]]
+        }
+    }
+}
+
+proc portconfigure::load_implicit_function_declaration_whitelist {sdk_version} {
+    set whitelist {}
+
+    set whitelist_file [getdefaultportresourcepath "port1.0/checks/implicit_function_declaration/macosx${sdk_version}.sdk.list"]
+    if {[file exists $whitelist_file]} {
+        set fd [open $whitelist_file r]
+        while {[gets $fd whitelist_entry] >= 0} {
+            lappend whitelist $whitelist_entry
+        }
+        close $fd
+    }
+
+    return $whitelist
+}
+
+proc portconfigure::configure_finish {args} {
+    global \
+        configure.dir \
+        configure.checks.implicit_function_declaration
+
+    if {[file isdirectory ${configure.dir}] && ${configure.checks.implicit_function_declaration}} {
+        portconfigure::check_implicit_function_declarations
+    }
 }

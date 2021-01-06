@@ -135,11 +135,11 @@ default os.minor {$os_minor}
 default os.arch {$os_arch}
 default os.endian {$os_endian}
 
-set macosx_version_text {}
+set macos_version_text {}
 if {[option os.platform] eq "darwin"} {
-    set macosx_version_text "(macOS ${macosx_version}) "
+    set macos_version_text "(macOS ${macos_version}) "
 }
-ui_debug "OS [option os.platform]/[option os.version] ${macosx_version_text}arch [option os.arch]"
+ui_debug "OS [option os.platform]/[option os.version] ${macos_version_text}arch [option os.arch]"
 
 default universal_variant {${use_configure}}
 
@@ -164,7 +164,7 @@ set egid [getegid]
 default worksymlink {[file normalize [file join $portpath work]]}
 default distpath {[file normalize [file join $portdbpath distfiles ${dist_subdir}]]}
 
-default use_xcode {[expr {[option build.type] eq "xcode" || ![file exists /usr/lib/libxcselect.dylib] || ![file executable /Library/Developer/CommandLineTools/usr/bin/make]}]}
+default use_xcode {[expr {[option build.type] eq "xcode" || !([file exists /usr/lib/libxcselect.dylib] || [option os.major] >= 20) || ![file executable /Library/Developer/CommandLineTools/usr/bin/make]}]}
 
 proc portmain::main {args} {
     return 0

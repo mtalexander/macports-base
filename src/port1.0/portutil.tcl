@@ -1343,7 +1343,7 @@ set ports_dry_last_skipped ""
 proc target_run {ditem} {
     global target_state_fd workpath portpath ports_trace PortInfo ports_dryrun \
            ports_dry_last_skipped worksrcpath subport env portdbpath \
-           macosx_version prefix_frozen
+           prefix_frozen
     set portname $subport
     set result 0
     set skipped 0
@@ -3276,10 +3276,10 @@ proc check_supported_archs {} {
 
 # check if the installed xcode version is new enough
 proc _check_xcode_version {} {
-    global os.subplatform os.major macosx_version xcodeversion use_xcode subport
+    global os.subplatform os.major macos_version_major xcodeversion use_xcode subport
 
     if {${os.subplatform} eq "macosx"} {
-        switch $macosx_version {
+        switch $macos_version_major {
             10.4 {
                 set min 2.0
                 set ok 2.4.1
@@ -3338,12 +3338,17 @@ proc _check_xcode_version {} {
             10.15 {
                 set min 11.0
                 set ok 11.3
-                set rec 11.6
+                set rec 11.7
+            }
+            11.0 {
+                set min 12.2
+                set ok 12.2
+                set rec 12.2
             }
             default {
-                set min 11.0
-                set ok 11.3
-                set rec 11.6
+                set min 12.2
+                set ok 12.2
+                set rec 12.2
             }
         }
         if {$xcodeversion eq "none"} {
@@ -3356,15 +3361,15 @@ proc _check_xcode_version {} {
                 return 1
             }
         } elseif {[vercmp $xcodeversion $min] < 0} {
-            ui_error "The installed version of Xcode (${xcodeversion}) is too old to use on the installed OS version. Version $rec or later is recommended on macOS ${macosx_version}."
+            ui_error "The installed version of Xcode (${xcodeversion}) is too old to use on the installed OS version. Version $rec or later is recommended on macOS ${macos_version_major}."
             return 1
         } elseif {[vercmp $xcodeversion $ok] < 0} {
-            ui_warn "The installed version of Xcode (${xcodeversion}) is known to cause problems. Version $rec or later is recommended on macOS ${macosx_version}."
+            ui_warn "The installed version of Xcode (${xcodeversion}) is known to cause problems. Version $rec or later is recommended on macOS ${macos_version_major}."
         }
 
         # Xcode 4.3 and above requires the command-line utilities package to be installed.
         if {[vercmp $xcodeversion 4.3] >= 0 || ($xcodeversion eq "none" && [file exists "/Applications/Xcode.app"])} {
-            if {[vercmp $macosx_version 10.9] >= 0} {
+            if {[vercmp $macos_version_major 10.9] >= 0} {
                 # on Mavericks, /usr/bin/make might always installed as a shim into the command line tools installer.
                 # Let's check for /Library/Developer/CommandLineTools, installed by the
                 # com.apple.pkg.CLTools_Executables package.
@@ -3380,7 +3385,7 @@ proc _check_xcode_version {} {
                 } else {
                     ui_warn "System headers do not appear to be installed. Most ports should build correctly, but if you experience problems due to a port depending on system headers, please file a ticket at https://trac.macports.org."
                 }
-                if {[vercmp $macosx_version 10.9] >= 0} {
+                if {[vercmp $macos_version_major 10.9] >= 0} {
                     ui_warn "You can install them as part of the Xcode Command Line Tools package by running `xcode-select --install'."
                 } else {
                     ui_warn "You can install them as part of the Xcode Command Line Tools package from Xcode's Preferences in the Downloads section."
@@ -3388,7 +3393,7 @@ proc _check_xcode_version {} {
                 }
             }
 
-            if {${os.major} >= 18 && [option configure.sdk_version] ne "" && [file tail [option configure.sdkroot]] ne "MacOSX[option configure.sdk_version].sdk"} {
+            if {${os.major} >= 18 && [option configure.sdk_version] ne "" && ![string match MacOSX[option configure.sdk_version]*.sdk [file tail [option configure.sdkroot]]]} {
                 ui_warn "The macOS [option configure.sdk_version] SDK does not appear to be installed. Ports may not build correctly."
                 ui_warn "You can install it as part of the Xcode Command Line Tools package by running `xcode-select --install'."
             }
