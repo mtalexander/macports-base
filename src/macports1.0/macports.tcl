@@ -1117,8 +1117,9 @@ match macports.conf.default."
         } else {
             set macports::universal_archs {i386 ppc}
         }
-    } elseif {[llength $macports::universal_archs] < 2} {
-        if {$os_major < 18} {
+    } elseif {[llength $macports::universal_archs] == 1} {
+        # allow empty value to disable universal
+        if {$os_major < 18 || $os_major > 19} {
             ui_warn "invalid universal_archs configured (should contain at least 2 archs)"
         }
     }
@@ -1915,7 +1916,11 @@ proc mportopen {porturl {options {}} {variations {}} {nocache {}}} {
 
     macports::worker_init $workername $portpath $porturl [macports::getportbuildpath $portpath] $options $variations
 
-    $workername eval {source Portfile}
+    if {[catch {$workername eval {source Portfile}} result]} {
+        mportclose $mport
+        ui_debug $::errorInfo
+        error $result
+    }
 
     # add the default universal variant if appropriate, and set up flags that
     # are conditional on whether universal is set
@@ -1975,7 +1980,12 @@ proc mportopen_installed {name version revision variants options} {
         set options_array(_portgroup_search_dirs) $pgdirlist
     }
 
-    return [mportopen file://${portfile_dir}/ [array get options_array] $variations]
+    set retmport [mportopen file://${portfile_dir}/ [array get options_array] $variations]
+    set workername [ditem_key $retmport workername]
+    foreach var {version revision variants} {
+        $workername eval [list set _inregistry_${var} [set $var]]
+    }
+    return $retmport
 }
 
 # Traverse a directory with ports, calling a function on the path of ports

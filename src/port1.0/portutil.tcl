@@ -716,6 +716,20 @@ proc variant_remove_ditem {name} {
     }
 }
 
+# variant_delete name
+# completely delete the named variant from the port
+proc variant_delete {name} {
+    variant_remove_ditem $name
+    if {[info exists ::PortInfo(variants)]} {
+        set ::PortInfo(variants) [ldelete $::PortInfo(variants) $name]
+    }
+    if {[info exists ::PortInfo(vinfo)]} {
+        array set vinfo $::PortInfo(vinfo)
+        unset -nocomplain vinfo($name)
+        set ::PortInfo(vinfo) [array get vinfo]
+    }
+}
+
 # variant_exists name
 # determine if a variant exists.
 proc variant_exists {name} {
@@ -2135,14 +2149,19 @@ proc check_variants {target} {
 # add the default universal variant if appropriate
 proc universal_setup {args} {
     if {[variant_exists universal]} {
-        ui_debug "universal variant already exists, so not adding the default one"
+        if {[llength [option configure.universal_archs]] >= 2} {
+            ui_debug "universal variant already exists, so not adding the default one"
+        } else {
+            ui_debug "removing universal variant due to < 2 supported universal_archs"
+            variant_delete universal
+        }
     } elseif {[exists universal_variant] && ![option universal_variant]} {
         ui_debug "universal_variant is false, so not adding the default universal variant"
     } elseif {[exists use_xmkmf] && [option use_xmkmf]} {
         ui_debug "using xmkmf, so not adding the default universal variant"
     } elseif {![exists os.universal_supported] || ![option os.universal_supported]} {
         ui_debug "OS doesn't support universal builds, so not adding the default universal variant"
-    } elseif {[llength [option supported_archs]] == 1} {
+    } elseif {[llength [option configure.universal_archs]] <= 1} {
         ui_debug "only one arch supported, so not adding the default universal variant"
     } elseif {![portconfigure::arch_flag_supported [option configure.compiler] yes]} {
         ui_debug "Compiler doesn't support universal builds, so not adding the default universal variant"
@@ -3210,7 +3229,7 @@ proc get_canonical_archs {} {
     global supported_archs os.arch configure.build_arch configure.universal_archs
     if {$supported_archs eq "noarch"} {
         return "noarch"
-    } elseif {[variant_exists universal] && [variant_isset universal]} {
+    } elseif {[variant_exists universal] && [variant_isset universal] && [llength ${configure.universal_archs}] >= 2} {
         return [lsort -ascii ${configure.universal_archs}]
     } elseif {${configure.build_arch} ne ""} {
         return ${configure.build_arch}
@@ -3221,7 +3240,7 @@ proc get_canonical_archs {} {
 
 # returns the flags that should be passed to the compiler to choose arch(s)
 proc get_canonical_archflags {{tool cc}} {
-    if {![variant_exists universal] || ![variant_isset universal]} {
+    if {![variant_exists universal] || ![variant_isset universal] || [llength [option configure.universal_archs]] < 2} {
         if {[catch {option configure.${tool}_archflags} flags]} {
             return -code error "archflags do not exist for tool '$tool'"
         }
@@ -3242,28 +3261,8 @@ proc check_supported_archs {} {
     if {$supported_archs eq "noarch"} {
         return 0
     } elseif {[variant_exists universal] && [variant_isset universal]} {
-        if {[llength ${configure.universal_archs}] > 1 || $universal_archs eq ${configure.universal_archs}} {
-            return 0
-        }
-        set unsupported ""
-        if {$supported_archs ne ""} {
-            foreach arch $universal_archs {
-                if {$arch ni $supported_archs} {
-                    set unsupported $arch
-                    break
-                }
-            }
-        }
-        if {$unsupported ne ""} {
-            ui_error "$subport cannot be installed for the configured universal_archs '$universal_archs' because it only supports the arch(s) '$supported_archs'."
-        } else {
-            foreach arch $universal_archs {
-                if {$arch ni ${configure.universal_archs}} {
-                    lappend unsupported $arch
-                }
-            }
-            ui_error "$subport cannot be installed for the configured universal_archs '$universal_archs' because the arch(s) '$unsupported' are not supported."
-        }
+        # universal variant would not exist if < 2 universal_archs were supported
+        return 0
     } elseif {$build_arch eq "" || ${configure.build_arch} ne ""} {
         return 0
     } elseif {$supported_archs ne "" && $build_arch ni $supported_archs} {

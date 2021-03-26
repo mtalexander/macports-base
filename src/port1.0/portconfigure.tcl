@@ -514,7 +514,13 @@ proc portconfigure::find_close_sdk {sdk_version sdk_path} {
     # only works right for versions >= 11, which is all we need
     set sdk_major [lindex [split $sdk_version .] 0]
     set sdks [glob -nocomplain -directory $sdk_path MacOSX${sdk_major}*.sdk]
-    return [lindex [lsort -command vercmp $sdks] 0]
+    foreach sdk [lsort -command vercmp $sdks] {
+        # Sanity check - mostly empty SDK directories are known to exist
+        if {[file exists ${sdk}/usr/include/sys/cdefs.h]} {
+            return $sdk
+        }
+    }
+    return ""
 }
 
 proc portconfigure::configure_get_sdkroot {sdk_version} {
@@ -825,9 +831,10 @@ proc portconfigure::max_version {verA verB} {
 #--------------------------------------------------------------------
 #|  C Standard  |   Clang   |  Xcode Clang  |   Xcode   |    GCC    |
 #|------------------------------------------------------------------|
-#| 1989 (C89)   |     -     |        -      |     -     |     -     |
-#| 1999 (C99)   |     -     |        -      |     -     |    4.0    |
-#| 2011 (C11)   |    3.3    |   500.2.75    |    5.0    |    4.9    |
+#| 1989 (C89)   |     -     |       -       |     -     |     -     |
+#| 1999 (C99)   |     -     |       -       |     -     |    4.0    |
+#| 2011 (C11)   |    3.3    |  500.2.75     |    5.0    |    4.9    |
+#| 2017 (C17)   |    6.0    |  1000.11.45.2 |   10.0    |    8.0    |
 #--------------------------------------------------------------------
 #
 # https://clang.llvm.org/cxx_status.html
@@ -895,7 +902,9 @@ proc portconfigure::get_min_command_line {compiler} {
                 # no Xcode clang can build against libc++ on < 10.7
                 return none
             }
-            if {${compiler.c_standard} >= 2011} {
+            if {${compiler.c_standard} >= 2017} {
+                set min_value [max_version $min_value 1000.11.45.2]
+            } elseif {${compiler.c_standard} >= 2011} {
                 set min_value [max_version $min_value 500.2.75]
             }
             if {${compiler.cxx_standard} >= 2017} {
@@ -903,16 +912,15 @@ proc portconfigure::get_min_command_line {compiler} {
             } elseif {${compiler.cxx_standard} >= 2014} {
                 set min_value [max_version $min_value 602.0.49]
             } elseif {${compiler.cxx_standard} >= 2011} {
-                if {${compiler.thread_local_storage}} {
-                    # macOS has supported thread-local storage since Mac OS X Lion.
-                    # So __thread (GNU extension) and _Thread_local (C11) could be used.
-                    # However, the C++11 keyword was not supported until Xcode 8
-                    #    (https://developer.apple.com/library/archive/releasenotes/DeveloperTools/RN-Xcode/Chapters/Introduction.html#//apple_ref/doc/uid/TP40001051-CH1-SW127)
-                    #    (https://developer.apple.com/videos/play/wwdc2016-405/?time=354).
-                    set min_value [max_version $min_value 800.0.38]
-                } else {
-                    set min_value [max_version $min_value 500.2.75]
-                }
+                set min_value [max_version $min_value 500.2.75]
+            }
+            if {${compiler.cxx_standard} >= 2011 && ${compiler.thread_local_storage}} {
+                # macOS has supported thread-local storage since Mac OS X Lion.
+                # So __thread (GNU extension) and _Thread_local (C11) could be used.
+                # However, the C++11 keyword was not supported until Xcode 8
+                #    (https://developer.apple.com/library/archive/releasenotes/DeveloperTools/RN-Xcode/Chapters/Introduction.html#//apple_ref/doc/uid/TP40001051-CH1-SW127)
+                #    (https://developer.apple.com/videos/play/wwdc2016-405/?time=354).
+                set min_value [max_version $min_value 800.0.38]
             }
             if {[option compiler.limit_flags] || [option compiler.support_environment_paths]} {
                 set min_value [max_version $min_value 421.0.57]
@@ -947,7 +955,9 @@ proc portconfigure::get_min_command_line {compiler} {
 proc portconfigure::get_min_clang {} {
     global compiler.c_standard compiler.cxx_standard compiler.openmp_version compiler.thread_local_storage
     set min_value 1.0
-    if {${compiler.c_standard} >= 2011} {
+    if {${compiler.c_standard} >= 2017} {
+        set min_value [max_version $min_value 6.0]
+    } elseif {${compiler.c_standard} >= 2011} {
         set min_value [max_version $min_value 3.1]
     }
     if {${compiler.cxx_standard} >= 2017} {
@@ -991,7 +1001,9 @@ proc portconfigure::get_min_gcc {} {
     }
 
     set min_value 1.0
-    if {${compiler.c_standard} >= 2011} {
+    if {${compiler.c_standard} >= 2017} {
+        set min_value [max_version $min_value 8.0]
+    } elseif {${compiler.c_standard} >= 2011} {
         set min_value [max_version $min_value 4.3]
     }  elseif {${compiler.c_standard} >= 1999} {
         set min_value [max_version $min_value 4.0]
