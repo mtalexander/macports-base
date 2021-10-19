@@ -130,7 +130,9 @@ int reg_open(reg_registry** regPtr, reg_error* errPtr) {
         /* Enable extended result codes, requires SQLite >= 3.3.8
          * Check added for compatibility with Tiger. */
 #if SQLITE_VERSION_NUMBER >= 3003008
-        sqlite3_extended_result_codes(reg->db, 1);
+        if (sqlite3_libversion_number() >= 3003008) {
+            sqlite3_extended_result_codes(reg->db, 1);
+        }
 #endif
 
         sqlite3_busy_timeout(reg->db, 25);
@@ -167,6 +169,39 @@ int reg_close(reg_registry* reg, reg_error* errPtr) {
                 "(%s)\n", sqlite3_errmsg(reg->db));
         return 0;
     }
+}
+
+/**
+ * Do some initial configuration of a registry object.
+ *
+ * @param [in] reg     the registry to configure
+ * @return             true if success; false if failure
+ */
+int reg_configure(reg_registry* reg) {
+    sqlite3_stmt* stmt = NULL;
+    int result = 0;
+#if SQLITE_VERSION_NUMBER >= 3022000
+    /* Ensure WAL files persist. */
+    if (sqlite3_libversion_number() >= 3022000) {
+        int persist = 1;
+        sqlite3_file_control(reg->db, "registry", SQLITE_FCNTL_PERSIST_WAL, &persist);
+    }
+#endif
+    /* Turn on fullfsync. */
+    if (sqlite3_prepare_v2(reg->db, "PRAGMA fullfsync = 1", -1, &stmt, NULL) == SQLITE_OK) {
+        int r;
+        do {
+            sqlite3_step(stmt);
+            r = sqlite3_reset(stmt);
+            if (r == SQLITE_OK) {
+                result = 1;
+            }
+        } while (r == SQLITE_BUSY);
+    }
+    if (stmt) {
+        sqlite3_finalize(stmt);
+    }
+    return result;
 }
 
 /**
@@ -275,7 +310,6 @@ int reg_detach(reg_registry* reg, reg_error* errPtr) {
     }
     if (sqlite3_prepare_v2(reg->db, query, -1, &stmt, NULL) == SQLITE_OK) {
         int r;
-        reg_entry* entry;
         Tcl_HashEntry* curr;
         Tcl_HashSearch search;
         /* XXX: Busy waiting, consider using sqlite3_busy_handler/timeout */
@@ -286,22 +320,39 @@ int reg_detach(reg_registry* reg, reg_error* errPtr) {
                 case SQLITE_OK:
                     for (curr = Tcl_FirstHashEntry(&reg->open_entries, &search);
                             curr != NULL; curr = Tcl_NextHashEntry(&search)) {
-                        entry = Tcl_GetHashValue(curr);
+                        reg_entry* entry = Tcl_GetHashValue(curr);
                         if (entry->proc) {
                             free(entry->proc);
                         }
                         free(entry);
                     }
                     Tcl_DeleteHashTable(&reg->open_entries);
+
                     for (curr = Tcl_FirstHashEntry(&reg->open_files, &search);
                             curr != NULL; curr = Tcl_NextHashEntry(&search)) {
                         reg_file* file = Tcl_GetHashValue(curr);
 
-                        free(file->proc);
+                        if (file->proc) {
+                            free(file->proc);
+                        }
+                        /* The rest of the reg_file structure is not
+                           cleaned up by delete_file, so this should
+                           always be safe. */
                         free(file->key.path);
                         free(file);
                     }
                     Tcl_DeleteHashTable(&reg->open_files);
+
+                    for (curr = Tcl_FirstHashEntry(&reg->open_portgroups, &search);
+                            curr != NULL; curr = Tcl_NextHashEntry(&search)) {
+                        reg_portgroup* portgroup = Tcl_GetHashValue(curr);
+                        if (portgroup->proc) {
+                            free(portgroup->proc);
+                        }
+                        free(portgroup);
+                    }
+                    Tcl_DeleteHashTable(&reg->open_portgroups);
+
                     reg->status &= ~reg_attached;
                     result = 1;
                     break;
@@ -472,6 +523,28 @@ int reg_vacuum(char *db_path) {
     }
     sqlite3_close(db);
     return result;
+}
+
+/**
+ * Checkpoints a registry database if WAL mode is available.
+ *
+ * @param [in] reg     registry to checkpoint
+ * @param [out] errPtr on error, a description of the error that occurred
+ * @return             true if success; false if failure
+ */
+int reg_checkpoint(reg_registry* reg, reg_error* errPtr) {
+
+#if SQLITE_VERSION_NUMBER >= 3022000
+    if (sqlite3_libversion_number() >= 3022000) {
+        if (sqlite3_db_readonly(reg->db, "registry") == 0
+                && sqlite3_wal_checkpoint_v2(reg->db, "registry",
+                SQLITE_CHECKPOINT_PASSIVE, NULL, NULL) != SQLITE_OK) {
+            reg_sqlite_error(reg->db, errPtr, NULL);
+            return 0;
+        }
+    }
+#endif
+    return 1;
 }
 
 /**

@@ -187,13 +187,13 @@ reg_entry* reg_entry_open(reg_registry* reg, char* name, char* version,
     char* query;
     if (strlen(epoch) > 0) {
         query = "SELECT id FROM registry.ports "
-#if SQLITE_VERSION_NUMBER >= 3006004
+#if MP_SQLITE_VERSION >= 3006004
                 "INDEXED BY port_name "
 #endif
                 "WHERE name=? AND version=? AND revision=? AND variants=? AND epoch=?";
     } else {
         query = "SELECT id FROM registry.ports "
-#if SQLITE_VERSION_NUMBER >= 3006004
+#if MP_SQLITE_VERSION >= 3006004
                 "INDEXED BY port_name "
 #endif
                 "WHERE name=? AND version=? AND revision=? AND variants=? AND epoch!=?";
@@ -251,6 +251,11 @@ reg_entry* reg_entry_open(reg_registry* reg, char* name, char* version,
 int reg_entry_delete(reg_entry* entry, reg_error* errPtr) {
     reg_registry* reg = entry->reg;
     int result = 0;
+
+    errPtr->code = REG_SQLITE_ERROR;
+    errPtr->description = "an unknown sqlite error occurred";
+    errPtr->free = NULL;
+
     sqlite3_stmt* ports = NULL;
     sqlite3_stmt* files = NULL;
     sqlite3_stmt* dependencies = NULL;
@@ -293,6 +298,7 @@ int reg_entry_delete(reg_entry* entry, reg_error* errPtr) {
                                                         case SQLITE_BUSY:
                                                             break;
                                                         case SQLITE_ERROR:
+                                                        default:
                                                             reg_sqlite_error(reg->db,
                                                                     errPtr, NULL);
                                                             break;
@@ -302,6 +308,7 @@ int reg_entry_delete(reg_entry* entry, reg_error* errPtr) {
                                             case SQLITE_BUSY:
                                                 break;
                                             case SQLITE_ERROR:
+                                            default:
                                                 reg_sqlite_error(reg->db,
                                                         errPtr, NULL);
                                                 break;
@@ -311,6 +318,7 @@ int reg_entry_delete(reg_entry* entry, reg_error* errPtr) {
                                 case SQLITE_BUSY:
                                     break;
                                 case SQLITE_ERROR:
+                                default:
                                     reg_sqlite_error(reg->db, errPtr, NULL);
                                     break;
                             }
@@ -325,6 +333,7 @@ int reg_entry_delete(reg_entry* entry, reg_error* errPtr) {
                 case SQLITE_BUSY:
                     break;
                 case SQLITE_ERROR:
+                default:
                     reg_sqlite_error(reg->db, errPtr, NULL);
                     break;
             }
@@ -415,6 +424,7 @@ int reg_entry_search(reg_registry* reg, const char** keys, const char** vals,
         /* get the strategy */
         op = reg_strategy_op(strategies[i], errPtr);
         if (op == NULL) {
+            free(query);
             return -1;
         }
         char* cond = sqlite3_mprintf(op, keys[i], vals[i]);
@@ -503,7 +513,7 @@ int reg_entry_installed(reg_registry* reg, char* name, reg_entry*** entries,
         format = "%s WHERE state='installed'";
     } else {
         format = "%s "
-#if SQLITE_VERSION_NUMBER >= 3006004
+#if MP_SQLITE_VERSION >= 3006004
                 "INDEXED BY port_name "
 #endif
                 "WHERE state='installed' AND name='%q'";
@@ -534,8 +544,8 @@ int reg_entry_owner(reg_registry* reg, char* path, int cs, reg_entry** entry,
     char *query = NULL;
 
     asprintf(&query, "SELECT id FROM registry.files %s WHERE (actual_path = ? %s) AND active",
-#if SQLITE_VERSION_NUMBER >= 3003013
-#if SQLITE_VERSION_NUMBER >= 3006004
+#if MP_SQLITE_VERSION >= 3003013
+#if MP_SQLITE_VERSION >= 3006004
              cs ? "INDEXED BY file_actual" : "INDEXED BY file_actual_nocase",
 #else
              "",
@@ -601,8 +611,8 @@ sqlite_int64 reg_entry_owner_id(reg_registry* reg, char* path, int cs) {
     char *query = NULL;
 
     asprintf(&query, "SELECT id FROM registry.files %s WHERE (actual_path = ? %s) AND active",
-#if SQLITE_VERSION_NUMBER >= 3003013
-#if SQLITE_VERSION_NUMBER >= 3006004
+#if MP_SQLITE_VERSION >= 3003013
+#if MP_SQLITE_VERSION >= 3006004
              cs ? "INDEXED BY file_actual" : "INDEXED BY file_actual_nocase",
 #else
              "",
@@ -879,7 +889,7 @@ int reg_entry_unmap(reg_entry* entry, char** files, int file_count,
     int result = 1;
     sqlite3_stmt* stmt = NULL;
     char* query = "DELETE FROM registry.files "
-#if SQLITE_VERSION_NUMBER >= 3006004
+#if MP_SQLITE_VERSION >= 3006004
                   "INDEXED BY file_path "
 #endif
                   "WHERE path=? AND id=?";
@@ -1084,7 +1094,7 @@ int reg_entry_activate(reg_entry* entry, char** files, char** as_files,
     char* select_query = "SELECT id FROM registry.files WHERE actual_path=? "
         "AND active";
     char* update_query = "UPDATE registry.files "
-#if SQLITE_VERSION_NUMBER >= 3006004
+#if MP_SQLITE_VERSION >= 3006004
         /* if the version of SQLite supports it force the usage of the index on
          * path, rather than the one on id which has a lot less discriminative
          * power and leads to very slow queries. This is needed for the new
@@ -1137,6 +1147,7 @@ int reg_entry_activate(reg_entry* entry, char** files, char** as_files,
                                         case SQLITE_BUSY:
                                             break;
                                         case SQLITE_ERROR:
+                                        default:
                                             reg_sqlite_error(reg->db, errPtr,
                                                     update_query);
                                             result = 0;
@@ -1147,6 +1158,7 @@ int reg_entry_activate(reg_entry* entry, char** files, char** as_files,
                             case SQLITE_BUSY:
                                 break;
                             case SQLITE_ERROR:
+                            default:
                                 reg_sqlite_error(reg->db, errPtr, select_query);
                                 result = 0;
                                 break;
@@ -1191,7 +1203,7 @@ int reg_entry_deactivate(reg_entry* entry, char** files, int file_count,
     int i;
     sqlite3_stmt* stmt = NULL;
     char* query = "UPDATE registry.files "
-#if SQLITE_VERSION_NUMBER >= 3006004
+#if MP_SQLITE_VERSION >= 3006004
         /* if the version of SQLite supports it force the usage of the index on
          * path, rather than the one on id which has a lot less discriminative
          * power and leads to very slow queries. This is needed for the new

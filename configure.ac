@@ -44,7 +44,7 @@ case "$MACOSX_VERSION" in
     AC_MSG_WARN([This version of macOS is out of date])
     AC_MSG_WARN([Please use the Mac App Store to update it])
     ;;
-  10.14|10.14.[[1-5]]|10.15|10.15.[[1-6]]|11.0)
+  10.14|10.14.[[1-5]]|10.15|10.15.[[1-6]]|11.[[0-2]]|11.[[0-2]].*)
     AC_MSG_WARN([This version of macOS is out of date])
     AC_MSG_WARN([Please run Software Update to update it])
     ;;
@@ -96,10 +96,8 @@ case "$XCODE_VERSION" in
     AC_MSG_WARN([This version of Xcode Tools is out of date])
     AC_MSG_WARN([Please consider upgrading as some ports fail compiling])
     ;;
-  2.*|3.*|4.*|5.*|6.*|7.*|8.*|9.*|10.*|11.*)
-    dnl Supported version
-    ;;
   *)
+    dnl Not a known problematic version
     ;;
 esac
 
@@ -128,7 +126,6 @@ MP_TOOL_PATH(OPEN, [open])
 MP_TOOL_PATH(OPENSSL, [openssl])
 MP_TOOL_PATH(RSYNC, [rsync])
 MP_TOOL_PATH(SED, [sed])
-MP_TOOL_PATH(SVN, [svn])
 MP_TOOL_PATH(SWIG, [swig])
 MP_TOOL_PATH(TAR, [tar])
 MP_TOOL_PATH(XAR, [xar])
@@ -172,7 +169,6 @@ AC_PATH_PROG(RMDIR, [rmdir], [])
 AC_PATH_PROG(RSYNC, [rsync], [])
 AC_PATH_PROG(SANDBOX_EXEC, [sandbox-exec], [], [/usr/bin])
 AC_PATH_PROG(SED, [sed])
-AC_PATH_PROG(SVN, [svn], [])
 AC_PATH_PROG(SWIG, [swig], [])
 AC_PATH_PROG(TAR, [tar])
 AC_PATH_PROG(UNZIP, [unzip])
@@ -292,8 +288,9 @@ MP_LIBCURL_FLAGS
 ## sqlite3
 MP_SQLITE3_FLAGS
 
-MP_CHECK_SQLITE_VERSION(3003011)
-if test "x${mp_sqlite_version_ge_3003011}" = "xno"; then
+MP_CHECK_SQLITE_VERSION
+AC_DEFINE_UNQUOTED([MP_SQLITE_VERSION], [$mp_sqlite_version], [SQLite version found])
+if test "$mp_sqlite_version" -lt 3003011; then
 	AC_DEFINE([sqlite3_prepare_v2], [sqlite3_prepare], [define sqlite3_prepare to sqlite_prepare_v2 if the latter is not available])
 fi
 

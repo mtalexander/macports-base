@@ -85,6 +85,7 @@ typedef struct {
 
 int reg_open(reg_registry** regPtr, reg_error* errPtr);
 int reg_close(reg_registry* reg, reg_error* errPtr);
+int reg_configure(reg_registry* reg);
 
 int reg_attach(reg_registry* reg, const char* path, reg_error* errPtr);
 int reg_detach(reg_registry* reg, reg_error* errPtr);
@@ -95,6 +96,7 @@ int reg_commit(reg_registry* reg, reg_error* errPtr);
 int reg_rollback(reg_registry* reg, reg_error* errPtr);
 
 int reg_vacuum(char* db_path);
+int reg_checkpoint(reg_registry* reg, reg_error* errPtr);
 
 int reg_get_metadata(reg_registry* reg, const char* key, char** value, reg_error* errPtr);
 int reg_set_metadata(reg_registry* reg, const char* key, const char* value, reg_error* errPtr);

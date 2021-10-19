@@ -47,7 +47,7 @@ const char* entry_props[] = {
     "version",
     "revision",
     "variants",
-    "negated_variants",
+    "requested_variants",
     "date",
     "state",
     "installtype",
@@ -236,17 +236,14 @@ static int entry_obj_activate(Tcl_Interp* interp, reg_entry* entry, int objc,
         char** files;
         char** as_files = NULL;
         reg_error error;
-        Tcl_Obj* as;
-        Tcl_Obj** as_listv;
+        Tcl_Obj* as = NULL;
+        Tcl_Obj** as_listv = NULL;
         Tcl_Obj** listv;
         int listc;
         int as_listc;
         int result = TCL_ERROR;
         if (objc >= 4) {
             as = objv[3];
-        } else {
-            as = NULL;
-            as_listv = NULL;
         }
         if (Tcl_ListObjGetElements(interp, objv[2], &listc, &listv) != TCL_OK) {
             return TCL_ERROR;
@@ -426,7 +423,7 @@ static entry_obj_cmd_type entry_cmds[] = {
     { "version", entry_obj_prop },
     { "revision", entry_obj_prop },
     { "variants", entry_obj_prop },
-    { "negated_variants", entry_obj_prop },
+    { "requested_variants", entry_obj_prop },
     { "date", entry_obj_prop },
     { "state", entry_obj_prop },
     { "installtype", entry_obj_prop },

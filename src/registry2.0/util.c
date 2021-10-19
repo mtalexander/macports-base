@@ -35,8 +35,11 @@
 #include <tcl.h>
 
 #include "util.h"
+#include "entry.h"
 #include "entryobj.h"
+#include "file.h"
 #include "fileobj.h"
+#include "portgroup.h"
 #include "portgroupobj.h"
 
 /**
@@ -48,11 +51,11 @@
  * `interp create` command, and is intended to generate names for created
  * objects of a similar nature.
  */
-char* unique_name(Tcl_Interp* interp, char* prefix, int* lower_bound) {
+char* unique_name(Tcl_Interp* interp, char* prefix, unsigned int* lower_bound) {
     size_t result_size = strlen(prefix) + TCL_INTEGER_SPACE + 1;
     char* result = malloc(result_size);
     Tcl_CmdInfo info;
-    int i;
+    unsigned int i;
     if (!result)
         return NULL;
     if (lower_bound == NULL) {
@@ -60,6 +63,9 @@ char* unique_name(Tcl_Interp* interp, char* prefix, int* lower_bound) {
     } else {
         i = *lower_bound;
     }
+    /* XXX Technically an infinite loop if all possible names are taken
+       - just assuming we won't use up all 4 billion, since performance
+       is going to become abysmal before we get there anyway. */
     for (; ; i++) {
         snprintf(result, result_size, "%s%d", prefix, i);
         if (Tcl_GetCommandInfo(interp, result, &info) == 0) {
@@ -179,7 +185,7 @@ int set_object(Tcl_Interp* interp, char* name, void* value, char* type,
  */
 int set_entry(Tcl_Interp* interp, char* name, reg_entry* entry,
         reg_error* errPtr) {
-    if (set_object(interp, name, entry, "entry", entry_obj_cmd, NULL,
+    if (set_object(interp, name, entry, "entry", entry_obj_cmd, delete_entry,
                 errPtr)) {
         entry->proc = strdup(name);
         if (!entry->proc) {
@@ -202,7 +208,7 @@ int set_entry(Tcl_Interp* interp, char* name, reg_entry* entry,
  */
 int set_file(Tcl_Interp* interp, char* name, reg_file* file,
         reg_error* errPtr) {
-    if (set_object(interp, name, file, "file", file_obj_cmd, NULL,
+    if (set_object(interp, name, file, "file", file_obj_cmd, delete_file,
                 errPtr)) {
         file->proc = strdup(name);
         if (!file->proc) {
@@ -225,7 +231,7 @@ int set_file(Tcl_Interp* interp, char* name, reg_file* file,
  */
 int set_portgroup(Tcl_Interp* interp, char* name, reg_portgroup* portgroup,
         reg_error* errPtr) {
-    if (set_object(interp, name, portgroup, "portgroup", portgroup_obj_cmd, NULL,
+    if (set_object(interp, name, portgroup, "portgroup", portgroup_obj_cmd, delete_portgroup,
                 errPtr)) {
         portgroup->proc = strdup(name);
         if (!portgroup->proc) {
@@ -287,9 +293,10 @@ int recast(void* userdata, cast_function* fn, void* castcalldata,
 }
 
 int entry_to_obj(Tcl_Interp* interp, Tcl_Obj** obj, reg_entry* entry,
-        int* lower_bound, reg_error* errPtr) {
+        void* param UNUSED, reg_error* errPtr) {
+    static unsigned int lower_bound = 0;
     if (entry->proc == NULL) {
-        char* name = unique_name(interp, "::registry::entry", lower_bound);
+        char* name = unique_name(interp, "::registry::entry", &lower_bound);
         if (!name) {
             return 0;
         }
@@ -304,9 +311,10 @@ int entry_to_obj(Tcl_Interp* interp, Tcl_Obj** obj, reg_entry* entry,
 }
 
 int file_to_obj(Tcl_Interp* interp, Tcl_Obj** obj, reg_file* file,
-        int* lower_bound, reg_error* errPtr) {
+        void* param UNUSED, reg_error* errPtr) {
+    static unsigned int lower_bound = 0;
     if (file->proc == NULL) {
-        char* name = unique_name(interp, "::registry::file", lower_bound);
+        char* name = unique_name(interp, "::registry::file", &lower_bound);
         if (!name) {
             return 0;
         }
@@ -321,9 +329,10 @@ int file_to_obj(Tcl_Interp* interp, Tcl_Obj** obj, reg_file* file,
 }
 
 int portgroup_to_obj(Tcl_Interp* interp, Tcl_Obj** obj, reg_portgroup* portgroup,
-        int* lower_bound, reg_error* errPtr) {
+        void* param UNUSED, reg_error* errPtr) {
+    static unsigned int lower_bound = 0;
     if (portgroup->proc == NULL) {
-        char* name = unique_name(interp, "::registry::portgroup", lower_bound);
+        char* name = unique_name(interp, "::registry::portgroup", &lower_bound);
         if (!name) {
             return 0;
         }
@@ -339,22 +348,19 @@ int portgroup_to_obj(Tcl_Interp* interp, Tcl_Obj** obj, reg_portgroup* portgroup
 
 int list_entry_to_obj(Tcl_Interp* interp, Tcl_Obj*** objs,
         reg_entry** entries, int entry_count, reg_error* errPtr) {
-    int lower_bound = 0;
-    return recast(interp, (cast_function*)entry_to_obj, &lower_bound, NULL,
+    return recast(interp, (cast_function*)entry_to_obj, NULL, NULL,
             (void***)objs, (void**)entries, entry_count, errPtr);
 }
 
 int list_file_to_obj(Tcl_Interp* interp, Tcl_Obj*** objs,
         reg_file** files, int file_count, reg_error* errPtr) {
-    int lower_bound = 0;
-    return recast(interp, (cast_function*)file_to_obj, &lower_bound, NULL,
+    return recast(interp, (cast_function*)file_to_obj, NULL, NULL,
             (void***)objs, (void**)files, file_count, errPtr);
 }
 
 int list_portgroup_to_obj(Tcl_Interp* interp, Tcl_Obj*** objs,
         reg_portgroup** portgroups, int portgroup_count, reg_error* errPtr) {
-    int lower_bound = 0;
-    return recast(interp, (cast_function*)portgroup_to_obj, &lower_bound, NULL,
+    return recast(interp, (cast_function*)portgroup_to_obj, NULL, NULL,
             (void***)objs, (void**)portgroups, portgroup_count, errPtr);
 }
 

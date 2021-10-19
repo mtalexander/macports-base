@@ -41,7 +41,7 @@
 
 /*** Keep all SQL compatible with SQLite 3.1.3 as shipped with Tiger.
  *** (Conditionally doing things a better way when possible based on
- *** SQLITE_VERSION_NUMBER is OK.)
+ *** MP_SQLITE_VERSION is OK.)
  ***/
 
 
@@ -130,11 +130,24 @@ static void sql_regexp(sqlite3_context* context, int argc UNUSED,
  */
 int create_tables(sqlite3* db, reg_error* errPtr) {
     static char* queries[] = {
+        /* settings (can't be set inside a transaction) */
+        "PRAGMA fullfsync = 1",
+        /* WAL was added in 3.7.0, but read-only access when using it only
+           became possible in 3.22.0. It might be possible to use WAL on
+           3.7.7 and later since that version added the ability to open a DB
+           read-only as long as there is an existing read/write connection.
+           But the DB would need to be changed back to a non-WAL journal_mode
+           after doing a SQLITE_CHECKPOINT_RESTART whenever the last writer
+           closes it. */
+#if MP_SQLITE_VERSION >= 3022000
+        "PRAGMA journal_mode=WAL",
+#endif
+
         "BEGIN",
 
         /* metadata table */
         "CREATE TABLE registry.metadata (key UNIQUE, value)",
-        "INSERT INTO registry.metadata (key, value) VALUES ('version', '1.204')",
+        "INSERT INTO registry.metadata (key, value) VALUES ('version', '1.210')",
         "INSERT INTO registry.metadata (key, value) VALUES ('created', strftime('%s', 'now'))",
 
         /* ports table */
@@ -147,7 +160,7 @@ int create_tables(sqlite3* db, reg_error* errPtr) {
             ", version TEXT COLLATE VERSION"
             ", revision INTEGER"
             ", variants TEXT"
-            ", negated_variants TEXT"
+            ", requested_variants TEXT"
             ", state TEXT"
             ", date DATETIME"
             ", installtype TEXT"
@@ -300,7 +313,7 @@ int update_db(sqlite3* db, reg_error* errPtr) {
             /* we need to update to 1.1, add binary field and index to files
              * table */
             static char* version_1_1_queries[] = {
-#if SQLITE_VERSION_NUMBER >= 3002000
+#if MP_SQLITE_VERSION >= 3002000
                 "ALTER TABLE registry.files ADD COLUMN binary BOOL",
 #else
                 /*
@@ -396,7 +409,7 @@ int update_db(sqlite3* db, reg_error* errPtr) {
             /* Delete the file_binary index, since it's a low-quality index
              * according to https://www.sqlite.org/queryplanner-ng.html#howtofix */
             static char* version_1_201_queries[] = {
-#if SQLITE_VERSION_NUMBER >= 3003000
+#if MP_SQLITE_VERSION >= 3003000
                 "DROP INDEX IF EXISTS registry.file_binary",
 #else
                 "DROP INDEX registry.file_binary",
@@ -621,7 +634,7 @@ int update_db(sqlite3* db, reg_error* errPtr) {
         if (sql_version(NULL, -1, version, -1, "1.204") < 0) {
             /* add */
             static char* version_1_204_queries[] = {
-#if SQLITE_VERSION_NUMBER >= 3002000
+#if MP_SQLITE_VERSION >= 3002000
                 "ALTER TABLE registry.ports ADD COLUMN cxx_stdlib TEXT",
                 "ALTER TABLE registry.ports ADD COLUMN cxx_stdlib_overridden INTEGER",
 #else
@@ -709,6 +722,129 @@ int update_db(sqlite3* db, reg_error* errPtr) {
             continue;
         }
 
+        if (sql_version(NULL, -1, version, -1, "1.205") < 0) {
+            /* enable fullfsync and possibly WAL */
+            static char* version_1_205_queries[] = {
+                "UPDATE registry.metadata SET value = '1.205' WHERE key = 'version'",
+                "COMMIT",
+                "PRAGMA fullfsync = 1",
+#if MP_SQLITE_VERSION >= 3022000
+                "PRAGMA journal_mode=WAL",
+#endif
+                NULL
+            };
+
+            sqlite3_finalize(stmt);
+            stmt = NULL;
+
+            if (!do_queries(db, version_1_205_queries, errPtr)) {
+                rollback_db(db);
+                return 0;
+            }
+
+            did_update = 1;
+            continue;
+        }
+
+        if (sql_version(NULL, -1, version, -1, "1.210") < 0) {
+            /* add */
+            static char* version_1_210_queries[] = {
+#if MP_SQLITE_VERSION >= 3025000
+                "ALTER TABLE registry.ports RENAME COLUMN negated_variants TO requested_variants",
+#else
+
+                /* Create a temporary table */
+                "CREATE TEMPORARY TABLE mp_ports_backup ("
+                "id INTEGER PRIMARY KEY"
+                ", name TEXT COLLATE NOCASE"
+                ", portfile TEXT"
+                ", location TEXT"
+                ", epoch INTEGER"
+                ", version TEXT COLLATE VERSION"
+                ", revision INTEGER"
+                ", variants TEXT"
+                ", negated_variants TEXT"
+                ", state TEXT"
+                ", date DATETIME"
+                ", installtype TEXT"
+                ", archs TEXT"
+                ", requested INTEGER"
+                ", os_platform TEXT"
+                ", os_major INTEGER"
+                ", cxx_stdlib TEXT"
+                ", cxx_stdlib_overridden INTEGER"
+                ", UNIQUE (name, epoch, version, revision, variants)"
+                ")",
+
+                /* Copy all data into the temporary table */
+                "INSERT INTO mp_ports_backup SELECT id, name, portfile, location, epoch, "
+                    "version, revision, variants, negated_variants, state, date, installtype, "
+                    "archs, requested, os_platform, os_major, cxx_stdlib, "
+                    "cxx_stdlib_overridden FROM registry.ports",
+
+                /* Drop the original table and re-create it with the new structure */
+                "DROP TABLE registry.ports",
+                "CREATE TABLE registry.ports ("
+                "id INTEGER PRIMARY KEY"
+                ", name TEXT COLLATE NOCASE"
+                ", portfile TEXT"
+                ", location TEXT"
+                ", epoch INTEGER"
+                ", version TEXT COLLATE VERSION"
+                ", revision INTEGER"
+                ", variants TEXT"
+                ", requested_variants TEXT"
+                ", state TEXT"
+                ", date DATETIME"
+                ", installtype TEXT"
+                ", archs TEXT"
+                ", requested INTEGER"
+                ", os_platform TEXT"
+                ", os_major INTEGER"
+                ", cxx_stdlib TEXT"
+                ", cxx_stdlib_overridden INTEGER"
+                ", UNIQUE (name, epoch, version, revision, variants)"
+                ")",
+                "CREATE INDEX registry.port_name ON ports"
+                    "(name, epoch, version, revision, variants)",
+                "CREATE INDEX registry.port_state ON ports(state)",
+
+                /* Copy all data back from temporary table */
+                "INSERT INTO registry.ports (id, name, portfile, location, epoch, version, "
+                    "revision, variants, requested_variants, state, date, installtype, archs, "
+                    "requested, os_platform, os_major, cxx_stdlib, cxx_stdlib_overridden) "
+                    "SELECT id, name, portfile, location, epoch, version, revision, "
+                    "variants, negated_variants, state, date, installtype, archs, "
+                    "requested, os_platform, os_major, cxx_stdlib, cxx_stdlib_overridden "
+                    "FROM mp_ports_backup",
+
+                /* Remove temporary table */
+                "DROP TABLE mp_ports_backup",
+#endif
+
+                /* Assume all existing variants were requested, which often
+                   won't be true, but does match the former upgrade behaviour. */
+                "UPDATE registry.ports SET requested_variants = variants || requested_variants",
+
+                "UPDATE registry.metadata SET value = '1.210' WHERE key = 'version'",
+
+                "COMMIT",
+                NULL
+            };
+
+            sqlite3_finalize(stmt);
+            stmt = NULL;
+
+            if (!do_queries(db, version_1_210_queries, errPtr)) {
+                rollback_db(db);
+                return 0;
+            }
+
+            did_update = 1;
+            continue;
+        }
+
+
         /* add new versions here, but remember to:
          *  - finalize the version query statement and set stmt to NULL
          *  - do _not_ use "BEGIN" in your query list, since a transaction has
@@ -718,7 +854,7 @@ int update_db(sqlite3* db, reg_error* errPtr) {
          *  - update the current version number below
          */
 
-        if (sql_version(NULL, -1, version, -1, "1.204") > 0) {
+        if (sql_version(NULL, -1, version, -1, "1.210") > 0) {
             /* the registry was already upgraded to a newer version and cannot be used anymore */
             reg_throw(errPtr, REG_INVALID, "Version number in metadata table is newer than expected.");
             sqlite3_finalize(stmt);
