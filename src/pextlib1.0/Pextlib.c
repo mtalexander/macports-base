@@ -511,7 +511,7 @@ static int fileIsBinaryCmd(ClientData clientData UNUSED, Tcl_Interp *interp, int
 
     path = Tcl_GetString(objv[1]);
     if (-1 == lstat(path, &st)) {
-        /* an error occured */
+        /* an error occurred */
         Tcl_SetErrno(errno);
         Tcl_ResetResult(interp);
         Tcl_AppendResult(interp, "lstat(", path, "):", (char *)Tcl_PosixError(interp), NULL);
@@ -913,6 +913,10 @@ int fs_case_sensitive_fallback(Tcl_Interp *interp, const char *path, mount_cs_ca
     int ret = -1;
     char *mntpoint = NULL;
 
+    if (!path) {
+        return ret;
+    }
+
     if (cache) {
         mntpoint = get_mntpoint(path);
 
@@ -924,10 +928,6 @@ int fs_case_sensitive_fallback(Tcl_Interp *interp, const char *path, mount_cs_ca
                 return ret;
             }
         }
-    }
-
-    if (!path) {
-        return ret;
     }
 
     char *lowercase_path = strdup(path);

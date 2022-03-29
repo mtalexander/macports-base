@@ -284,11 +284,8 @@ InstallCmd(ClientData clientData UNUSED, Tcl_Interp *interp, int objc, Tcl_Obj *
 	}
 
 	/* must have at least two arguments, except when creating directories */
-	if (objc < 2 && !dodir) {
-		usage(interp);
-		return TCL_ERROR;
-	}
-	else if (dodir && !objc) {
+	if ((objc < 2 && !dodir) ||
+		(dodir && !objc)) {
 		usage(interp);
 		return TCL_ERROR;
 	}
@@ -548,7 +545,7 @@ install(Tcl_Interp *interp, const char *from_name, const char *to_name, u_long f
 				return TCL_ERROR;
 #if HAVE_COPYFILE
 			if (copyfile)
-				copyfile(from_name, tempcopy ? tempfile : to_name, 0, 0x5);
+				copyfile(from_name, tempcopy ? tempfile : to_name, 0, 0x5); /* 0x5 is COPYFILE_ACL | COPYFILE_XATTR. */
 #endif
 		}
 	}
@@ -1032,9 +1029,9 @@ strip(const char *to_name)
 
 /*
  * install_dir --
- *	build directory heirarchy
+ *	build directory hierarchy
  */
-int
+static int
 install_dir(Tcl_Interp *interp, char *path)
 {
 	char *p;
@@ -1100,7 +1097,7 @@ usage(Tcl_Interp *interp)
  * trymmap --
  *	return true (1) if mmap should be tried, false (0) if not.
  */
-int
+static int
 #ifdef MFSNAMELEN
 trymmap(int fd)
 #else

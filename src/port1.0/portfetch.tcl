@@ -103,7 +103,7 @@ default hg.dir {${workpath}}
 default hg.tag tip
 
 # Set distfiles
-default distfiles {[portfetch::suffix $distname]}
+default distfiles {[list [portfetch::suffix [join $distname]]]}
 default dist_subdir {${name}}
 
 # user name & password
@@ -220,7 +220,7 @@ set_ui_prefix
 # Given a distname, return the distname with extract.suffix appended
 proc portfetch::suffix {distname} {
     global extract.suffix
-    return "${distname}${extract.suffix}"
+    return ${distname}[join ${extract.suffix}]
 }
 # XXX import suffix into the global namespace as it is currently used from
 # Portfiles, but should better go somewhere else
@@ -364,7 +364,7 @@ proc portfetch::cvsfetch {args} {
         set cvs.cmd "echo ${cvs.password} | ${cvs.cmd}"
         set cvs.args login
         set cvs.post_args ""
-        if {[catch {command_exec cvs -notty "" "2>&1"} result]} {
+        if {[catch {command_exec -notty cvs "" "2>&1"} result]} {
             return -code error [msgcat::mc "CVS login failed"]
         }
         set cvs.cmd ${savecmd}
@@ -446,14 +446,14 @@ proc portfetch::gitfetch {args} {
         # if we're just using HEAD, we can make a shallow repo
         append options " --depth=1"
     }
-    set cmdstring "${git.cmd} clone $options ${git.url} ${worksrcpath} 2>&1"
+    set cmdstring "${git.cmd} clone $options ${git.url} [shellescape ${worksrcpath}] 2>&1"
     ui_debug "Executing: $cmdstring"
     if {[catch {system $cmdstring} result]} {
         return -code error [msgcat::mc "Git clone failed"]
     }
 
     if {${git.branch} ne ""} {
-        set env "GIT_DIR=${worksrcpath}/.git GIT_WORK_TREE=${worksrcpath}"
+        set env "GIT_DIR=[shellescape ${worksrcpath}/.git] GIT_WORK_TREE=[shellescape ${worksrcpath}]"
         set cmdstring "$env ${git.cmd} checkout -q ${git.branch} 2>&1"
         ui_debug "Executing $cmdstring"
         if {[catch {system $cmdstring} result]} {
@@ -478,7 +478,7 @@ proc portfetch::hgfetch {args} {
         set insecureflag " --insecure"
     }
 
-    set cmdstring "${hg.cmd} clone${insecureflag} --rev \"${hg.tag}\" ${hg.url} ${worksrcpath} 2>&1"
+    set cmdstring "${hg.cmd} clone${insecureflag} --rev \"${hg.tag}\" ${hg.url} [shellescape ${worksrcpath}] 2>&1"
     ui_debug "Executing: $cmdstring"
     if {[catch {system $cmdstring} result]} {
         return -code error [msgcat::mc "Mercurial clone failed"]

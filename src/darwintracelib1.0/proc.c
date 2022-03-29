@@ -214,6 +214,9 @@ static inline int check_interpreter(const char *restrict path) {
 	 *   bytes left before the end-of-file, but in no other case.
 	 * That _does_ save us another ugly loop to get things right. */
 	bytes_read = read(fd, buffer, sizeof(buffer) - 1);
+	if (bytes_read < 0) {
+		return errno;
+	}
 	buffer[bytes_read] = '\0';
 	close(fd);
 
@@ -232,7 +235,7 @@ static inline int check_interpreter(const char *restrict path) {
 			strsep(&interp_end, " \t");
 		}
 
-		/* check the iterpreter against the sandbox */
+		/* check the interpreter against the sandbox */
 		if (!__darwintrace_is_in_sandbox(interp, DT_REPORT | DT_ALLOWDIR | DT_FOLLOWSYMS)) {
 			return ENOENT;
 		}

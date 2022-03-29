@@ -378,6 +378,7 @@ proc command_exec {args} {
     set notty ""
     set command_prefix ""
     set command_suffix ""
+    set varprefix ""
 
     while {[llength $args] > 0} {
         switch -glob -- [lindex $args 0] {
@@ -411,7 +412,9 @@ proc command_exec {args} {
     }
 
     set command [lindex $args 0]
-    set varprefix "${command}"
+    if {$varprefix eq ""} {
+        set varprefix "$command"
+    }
 
     if {[llength $args] > 1} {
         set command_prefix [lindex $args 1]
@@ -470,7 +473,7 @@ proc command_exec {args} {
     # TODO: move that to the system native call?
     # Save the environment.
     array set saved_env [array get env]
-    # Set the overriden variables from the portfile.
+    # Set the overridden variables from the portfile.
     array set env [array get ${varprefix}.env_array]
     # Call the command.
     set fullcmdstring "$command_prefix $cmdstring $command_suffix"
@@ -1345,9 +1348,9 @@ proc lipo {} {
         file delete ${file}
         set lipoSources ""
         foreach arch $universal_archlist {
-            append lipoSources "-arch ${arch} ${workpath}/${arch}/${file} "
+            append lipoSources "-arch ${arch} [shellescape ${workpath}/${arch}/${file}] "
         }
-        system "[findBinary lipo $portutil::autoconf::lipo_path] ${lipoSources}-create -output ${file}"
+        system "[findBinary lipo $portutil::autoconf::lipo_path] ${lipoSources}-create -output [shellescape ${file}]"
     }
 }
 
@@ -2788,16 +2791,16 @@ proc extract_archive_metadata {archive_location archive_type metadata_type} {
             set raw_contents [exec -ignorestderr [findBinary tar ${portutil::autoconf::tar_path}] -xO${qflag}f $archive_location --use-compress-program [findBinary lzma ""] ./+CONTENTS]
         }
         xar {
-            system -W ${tempdir} "[findBinary xar ${portutil::autoconf::xar_path}] -xf $archive_location +CONTENTS"
+            system -W ${tempdir} "[findBinary xar ${portutil::autoconf::xar_path}] -xf [shellescape $archive_location] +CONTENTS"
         }
         zip {
             set raw_contents [exec -ignorestderr [findBinary unzip ${portutil::autoconf::unzip_path}] -p $archive_location +CONTENTS]
         }
         cpgz {
-            system -W ${tempdir} "[findBinary pax ${portutil::autoconf::pax_path}] -rzf $archive_location +CONTENTS"
+            system -W ${tempdir} "[findBinary pax ${portutil::autoconf::pax_path}] -rzf [shellescape $archive_location] +CONTENTS"
         }
         cpio {
-            system -W ${tempdir} "[findBinary pax ${portutil::autoconf::pax_path}] -rf $archive_location +CONTENTS"
+            system -W ${tempdir} "[findBinary pax ${portutil::autoconf::pax_path}] -rf [shellescape $archive_location] +CONTENTS"
         }
     }
     if {[info exists twostep]} {
@@ -3353,10 +3356,15 @@ proc _check_xcode_version {} {
                 set ok 12.2
                 set rec 12.5
             }
+            12 {
+                set min 13.1
+                set ok 13.1
+                set rec 13.2.1
+            }
             default {
-                set min 12.2
-                set ok 12.2
-                set rec 12.5
+                set min 13.1
+                set ok 13.1
+                set rec 13.2.1
             }
         }
         if {$xcodeversion eq "none"} {
@@ -3401,9 +3409,16 @@ proc _check_xcode_version {} {
                 }
             }
 
-            if {${os.major} >= 18 && [option configure.sdk_version] ne "" && ![string match MacOSX[option configure.sdk_version]*.sdk [file tail [option configure.sdkroot]]]} {
-                ui_warn "The macOS [option configure.sdk_version] SDK does not appear to be installed. Ports may not build correctly."
-                ui_warn "You can install it as part of the Xcode Command Line Tools package by running `xcode-select --install'."
+            if {${os.major} >= 18 && [option configure.sdk_version] ne "" &&
+                ![string match MacOSX[option configure.sdk_version]*.sdk [file tail [option configure.sdkroot]]]} {
+                if { [option configure.sdkroot] eq "" } {
+                    ui_warn "The macOS [option configure.sdk_version] SDK is requested but configure.sdkroot is set to"
+                    ui_warn "a NULL string. Ports may not build correctly with this configuration."
+                } else {
+                    ui_warn "The macOS [option configure.sdk_version] SDK does not appear to be match the configured"
+                    ui_warn "SDKROOT '[option configure.sdkroot]'. Ports may not build correctly."
+                    ui_warn "You can install it as part of the Xcode Command Line Tools package by running `xcode-select --install'."
+                }
             }
 
             # Check whether users have agreed to the Xcode license agreement
@@ -3474,6 +3489,7 @@ proc _archive_available {} {
         append site [option archive.subdir]
     }
     set url [portfetch::assemble_url $site $archivename]
+    ui_debug "Fetching $archivename archive size"
     # curl getsize can return -1 instead of throwing an error for
     # nonexistent files on FTP sites.
     if {![catch {curl getsize $url} size] && $size > 0} {

@@ -2919,13 +2919,13 @@ proc mportsync {{optionslist {}}} {
                 set striparg "--strip-components=1"
 
                 set tar [macports::findBinary tar $macports::autoconf::tar_path]
-                if {[catch {system -W "${destdir}" "$tar $verboseflag $striparg $extflag -xf $tarpath"} error]} {
+                if {[catch {system -W ${destdir} "$tar $verboseflag $striparg $extflag -xf [macports::shellescape $tarpath]"} error]} {
                     ui_error "Extracting $source failed ($error)"
                     incr numfailed
                     continue
                 }
 
-                if {[catch {system "chmod -R a+r \"$destdir\""}]} {
+                if {[catch {system "chmod -R a+r [macports::shellescape $destdir]"}]} {
                     ui_warn "Setting world read permissions on parts of the ports tree failed, need root?"
                 }
 
@@ -2955,7 +2955,7 @@ proc mportsync {{optionslist {}}} {
             if {![info exists options(no_reindex)]} {
                 global macports::prefix
                 set indexdir [file dirname [macports::getindex $source]]
-                if {[catch {system "${macports::prefix}/bin/portindex $indexdir"}]} {
+                if {[catch {system "${macports::prefix}/bin/portindex [macports::shellescape $indexdir]"}]} {
                     ui_error "updating PortIndex for $source failed"
                 }
             }
@@ -3911,7 +3911,7 @@ proc macports::_upgrade {portname dspec variationslist optionslist {depscachenam
         ui_error "port lookup failed: $eMessage"
         return 1
     }
-    # argh! port doesnt exist!
+    # argh! port doesn't exist!
     if {$result eq ""} {
         ui_warn "No port $portname found in the index."
         return 2
@@ -3959,13 +3959,12 @@ proc macports::_upgrade {portname dspec variationslist optionslist {depscachenam
                 return $status
             }
             # now install it
-            if {[catch {set result [mportexec $mport activate]} result]} {
+            if {[catch {mportexec $mport activate} result]} {
                 ui_debug $::errorInfo
                 ui_error "Unable to exec port: $result"
                 catch {mportclose $mport}
                 return 1
-            }
-            if {$result > 0} {
+            } elseif {$result != 0} {
                 ui_error "Problem while installing $portname"
                 catch {mportclose $mport}
                 return $result
@@ -4270,28 +4269,31 @@ proc macports::_upgrade {portname dspec variationslist optionslist {depscachenam
             # doing this instead of just running install ensures that we have the
             # new copy ready but not yet installed, so we can safely uninstall the
             # existing one.
-            if {[catch {set result [mportexec $mport archivefetch]} result] || $result != 0} {
-                if {[info exists ::errorInfo]} {
-                    ui_debug $::errorInfo
-                }
+            if {[catch {mportexec $mport archivefetch} result]} {
+                ui_debug $::errorInfo
+                _upgrade_cleanup
+                return 1
+            } elseif {$result != 0} {
                 _upgrade_cleanup
                 return 1
             }
             # the following is a noop if archivefetch found an archive
-            if {[catch {set result [mportexec $mport destroot]} result] || $result != 0} {
-                if {[info exists ::errorInfo]} {
-                    ui_debug $::errorInfo
-                }
+            if {[catch {mportexec $mport destroot} result]} {
+                ui_debug $::errorInfo
+                _upgrade_cleanup
+                return 1
+            } elseif {$result != 0} {
                 _upgrade_cleanup
                 return 1
             }
         } else {
             # Normal non-forced case
             # install version_in_tree (but don't activate yet)
-            if {[catch {set result [mportexec $mport install]} result] || $result != 0} {
-                if {[info exists ::errorInfo]} {
-                    ui_debug $::errorInfo
-                }
+            if {[catch {mportexec $mport install} result]} {
+                ui_debug $::errorInfo
+                _upgrade_cleanup
+                return 1
+            } elseif {$result != 0} {
                 _upgrade_cleanup
                 return 1
             }
@@ -4321,6 +4323,10 @@ proc macports::_upgrade {portname dspec variationslist optionslist {depscachenam
             ui_error "Uninstall $newname ${version_in_tree}_${revision_in_tree}$portinfo(canonical_active_variants) failed: $result"
             _upgrade_cleanup
             return 1
+        }
+        # newregref is rendered invalid if the port was uninstalled
+        if {!$is_dryrun} {
+            unset newregref
         }
         if {!$force_cur} {
             unset options(ports_force)
@@ -4361,8 +4367,14 @@ proc macports::_upgrade {portname dspec variationslist optionslist {depscachenam
         }
         ui_msg "Skipping activate $newname @${version_in_tree}_${revision_in_tree}$portinfo(canonical_active_variants) (dry run)"
     } else {
+        set failed 0
         if {[catch {mportexec $mport activate} result]} {
             ui_debug $::errorInfo
+            set failed 1
+        } elseif {$result != 0} {
+            set failed 1
+        }
+        if {$failed} {
             ui_error "Couldn't activate $newname ${version_in_tree}_${revision_in_tree}$portinfo(canonical_active_variants): $result"
             _upgrade_cleanup
             return 1
@@ -4371,6 +4383,8 @@ proc macports::_upgrade {portname dspec variationslist optionslist {depscachenam
             $workername eval "set ::portstartupitem::load_only [list $loaded_startupitems]"
             if {[catch {mportexec $mport load} result]} {
                 ui_debug $::errorInfo
+                ui_warn "Error loading startupitem(s) for ${newname}: $result"
+            } elseif {$result != 0} {
                 ui_warn "Error loading startupitem(s) for ${newname}: $result"
             }
             $workername eval "unset ::portstartupitem::load_only"
@@ -4405,6 +4419,10 @@ proc macports::_upgrade {portname dspec variationslist optionslist {depscachenam
     }
 
     if {[info exists uninstall_later] && $uninstall_later} {
+        if {[catch {registry::entry imaged $portname} ilist]} {
+            ui_error "Checking installed version failed: $ilist"
+            return 1
+        }
         foreach i $ilist {
             set version [$i version]
             set revision [$i revision]
@@ -4412,7 +4430,6 @@ proc macports::_upgrade {portname dspec variationslist optionslist {depscachenam
             if {$version eq $version_in_tree && $revision == $revision_in_tree && $variant eq $portinfo(canonical_active_variants) && $portname eq $newname} {
                 continue
             }
-            set epoch [$i epoch]
             ui_debug "Uninstalling $portname ${version}_${revision}$variant"
             if {$is_dryrun} {
                 ui_msg "Skipping uninstall $portname @${version}_${revision}$variant (dry run)"
@@ -4674,7 +4691,7 @@ proc macports::diagnose_main {opts} {
 ##
 # Run reclaim if necessary
 #
-# @return 0 on success, 1 if an exception occured during the execution
+# @return 0 on success, 1 if an exception occurred during the execution
 #         of reclaim, 2 if the execution was aborted on user request.
 proc macports::reclaim_check_and_run {} {
     if {[macports::ui_isset ports_quiet]} {
@@ -4786,7 +4803,7 @@ proc macports::get_actual_cxx_stdlib {binaries} {
 #        ID load command of binaries should be check for sanity. This is mostly
 #        useful for maintainers.
 # @return 0 if report-only mode is enabled, no ports are broken, or the
-#         rebuilds finished successfully. 1 if an exception occured during the
+#         rebuilds finished successfully. 1 if an exception occurred during the
 #         execution of rev-upgrade, 2 if the execution was aborted on user
 #         request.
 proc macports::revupgrade {opts} {
@@ -5680,7 +5697,7 @@ proc macports::shellescape {arg} {
 ##
 # Given a list of maintainers as recorded in a Portfile, return a list of lists
 # in [key value ...] format describing all maintainers. Valid keys are 'email'
-# which denotes a maintainer's email address, 'github', which preceeds the
+# which denotes a maintainer's email address, 'github', which precedes the
 # GitHub username of the maintainer and 'keyword', which contains a special
 # maintainer keyword such as 'openmaintainer' or 'nomaintainer'.
 #

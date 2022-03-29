@@ -111,7 +111,7 @@ io_connect_t        pwrRootPort         = 0;
 int                 restartOnWakeup     = 0;        // TRUE to restart daemon on wake from sleep
 CFRunLoopTimerRef   restartTimer        = NULL;     // Timer for scheduled restart
 CFTimeInterval      restartHysteresis   = 5.0;      // Default hysteresis is 5 seconds
-int				    restartWait		   	= 3;      	// Default wait during restart is 3 seconds
+int                 restartWait         = 3;        // Default wait during restart is 3 seconds
 
 
 __printflike(1, 2)
@@ -223,9 +223,9 @@ DoHelp(void)
         "escape or quote the ';' to protect it from special handling by your shell.\n"
         "\n"
         "daemondo runs in one of two modes: (1) If no stop-cmd is given, daemondo\n"
-        "executes start-cmd asyncronously, and tracks the process id; that process id\n"
+        "executes start-cmd asynchronously, and tracks the process id; that process id\n"
         "is used to signal the daemon for later stop and/or restart. (2) If stop-cmd\n"
-        "is given, then both start-cmd and stop-cmd are issued syncronously, and are\n"
+        "is given, then both start-cmd and stop-cmd are issued synchronously, and are\n"
         "assumed to do all the work of controlling the daemon. In such cases there is\n"
         "no process id to track. In either mode, restart-cmd, if present, is used to\n"
         "restart the daemon. If in mode 1, restart-cmd must not disrupt the process id.\n"
@@ -296,15 +296,15 @@ DestroyPidFile(void)
             break;
         case kPidStyleExec:         // We wrote the file, and we'll remove it
         case kPidStyleFileClean:    // The process wrote the file, but we'll remove it
-			if (verbosity >= 5)
-				LogMessage("Attempting to delete pidfile %s\n", pidFile);
+            if (verbosity >= 5)
+                LogMessage("Attempting to delete pidfile %s\n", pidFile);
             if (unlink(pidFile) && verbosity >= 3)
-				LogMessage("Failed attempt to delete pidfile %s (%d)\n", pidFile, errno);            
+                LogMessage("Failed attempt to delete pidfile %s (%d)\n", pidFile, errno);
             break;
         }
     } else {
-		if (verbosity >= 5)
-			LogMessage("No pidfile to delete: none specified\n");
+        if (verbosity >= 5)
+            LogMessage("No pidfile to delete: none specified\n");
     }
 }
 
@@ -352,21 +352,21 @@ DeletePreexistingPidFile(void)
     
     // Log information about the discovered pid file
     if (verbosity >= 3 && pid != -1) {
-    	LogMessage("Discovered preexisting pidfile %s containing pid %d which is a %s process\n", pidFile, pid, 
-    		(valid) ? "valid" : "invalid");
+        LogMessage("Discovered preexisting pidfile %s containing pid %d which is a %s process\n", pidFile, pid,
+            (valid) ? "valid" : "invalid");
     }
-    
+
     // Try to delete the pidfile if it's present
     if (pid != -1) {
-	    if (unlink(pidFile)) {
-	    	if (verbosity >= 3)
-		  		LogMessage("Error %d while trying to cleanup prexisting pidfile %s\n", errno, pidFile);
-	  	} else {
- 	  		if (verbosity >= 3)
-		  		LogMessage("Deleted preexisting pidfile %s\n", pidFile);
-		}
-	}
-    
+        if (unlink(pidFile)) {
+            if (verbosity >= 3)
+                LogMessage("Error %d while trying to cleanup preexisting pidfile %s\n", errno, pidFile);
+        } else {
+            if (verbosity >= 3)
+                LogMessage("Deleted preexisting pidfile %s\n", pidFile);
+        }
+    }
+
     return pid;
 }
 
@@ -548,8 +548,8 @@ Start(void)
     
     if (verbosity >= 1)
         LogMessage("Starting process\n");
-	if (pidFile != NULL)
-		DeletePreexistingPidFile();
+    if (pidFile != NULL)
+        DeletePreexistingPidFile();
     if (verbosity >= 2)
         LogMessage("Running start-cmd %s\n", CatArray(startArgs, buf, sizeof(buf)));
         
@@ -686,8 +686,8 @@ Restart(void)
     }
     else
     {
-    	// Bug: we should recapture the target process id from the pidfile in this case
-    	
+        // Bug: we should recapture the target process id from the pidfile in this case
+
         // Execute the restart-cmd and trust it to do the job
         if (verbosity >= 1)
             LogMessage("Restarting process\n");

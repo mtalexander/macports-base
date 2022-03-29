@@ -112,7 +112,7 @@ test option {
 
 
 test exists {
-    Exists unit test. Checks for existance of a Portfile option.
+    Exists unit test. Checks for existence of a Portfile option.
 } -body {
     set vara a
     if {[exists vara] != 1} {return "FAIL: option exists but not detected"}
@@ -168,7 +168,7 @@ test options {
     Options unit test.
 } -body {
     options date
-    if {[date macports] != "macports"} {return "FAIL: incorect options"}
+    if {[date macports] != "macports"} {return "FAIL: incorrect options"}
     return "Options successful."
 } -result "Options successful."
 
@@ -802,11 +802,20 @@ test get_portimage_name {
     set configure.build_arch no
     set portarchivetype tgz
     set subport testport
-    set portvariants {var1}
+    set portvariants {+var1}
     set supported_archs {}
 
     set res [get_portimage_name]
-    if {$res != "testport-1.0_2var1.darwin_10.no.tgz"} {
+    if {$res != "testport-1.0_2+var1.darwin_10.no.tgz"} {
+        return "FAIL: invalid portimage_name"
+    }
+
+    # +var1+var2+...
+    for {set i 2} {$i <= 40} {incr i} {
+        set portvariants "$portvariants+var$i"
+    }
+    set res [get_portimage_name]
+    if {$res != "testport-1.0_2+9ef57c364ca3d2c29383b378c846bdd5bacc2bf1.darwin_10.no.tgz"} {
         return "FAIL: invalid portimage_name"
     }
     return "Get portimage_name successful."
