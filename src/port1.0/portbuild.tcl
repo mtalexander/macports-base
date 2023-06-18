@@ -139,20 +139,20 @@ proc portbuild::build_getjobs {args} {
     }
     # if set to '0', use the number of cores for the number of jobs
     if {$jobs == 0} {
-        try -pass_signal {
+        macports_try -pass_signal {
             set jobs [sysctl hw.activecpu]
-        } catch {{*} eCode eMessage} {
+        } on error {} {
             set jobs 2
             ui_warn "failed to determine the number of available CPUs (probably not supported on this platform)"
             ui_warn "defaulting to $jobs jobs, consider setting buildmakejobs to a nonzero value in macports.conf"
         }
 
-        try -pass_signal {
+        macports_try -pass_signal {
             set memsize [sysctl hw.memsize]
             if {$jobs > $memsize / (1024 * 1024 * 1024) + 1} {
                 set jobs [expr {$memsize / (1024 * 1024 * 1024) + 1}]
             }
-        } catch {*} {}
+        } on error {} {}
     }
     if {![string is integer -strict $jobs] || $jobs <= 1} {
         set jobs 1
@@ -172,15 +172,16 @@ proc portbuild::build_getargs {args} {
 }
 
 proc portbuild::build_getjobsarg {args} {
+    set cmdname [file tail [lindex [option build.cmd] 0]]
     if {![exists build.jobs] || \
-            !([string match "*make*" [option build.cmd]] || \
-              [string match "*ninja*" [option build.cmd]] || \
-              [string match "*scons*" [option build.cmd]])} {
+            !([string match "*make" $cmdname] || \
+              "ninja" eq $cmdname || \
+              "scons" eq $cmdname)} {
         return ""
     }
-    
+
     set jobs [option build.jobs]
-    if {![string is integer -strict $jobs] || $jobs < 1} {
+    if {![string is integer -strict $jobs] || $jobs < 1 || ($cmdname ne "ninja" && $jobs < 2)} {
         return ""
     }
     return " -j$jobs"

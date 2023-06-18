@@ -285,15 +285,6 @@ MP_PLATFORM
 ## libcurl
 MP_LIBCURL_FLAGS
 
-## sqlite3
-MP_SQLITE3_FLAGS
-
-MP_CHECK_SQLITE_VERSION
-AC_DEFINE_UNQUOTED([MP_SQLITE_VERSION], [$mp_sqlite_version], [SQLite version found])
-if test "$mp_sqlite_version" -lt 3003011; then
-	AC_DEFINE([sqlite3_prepare_v2], [sqlite3_prepare], [define sqlite3_prepare to sqlite_prepare_v2 if the latter is not available])
-fi
-
 # check whether trace mode is supported on this platform
 MP_TRACEMODE_SUPPORT
 
@@ -335,22 +326,13 @@ exec_prefix=$oldexec_prefix
 ## Tcl package
 MP_CONFIG_SUBDIR([vendor/tcl/unix], [--prefix=${macports_libexec_dir} --enable-threads])
 VENDOR_TCL_SUBDIR=tcl/unix
-VENDOR_TCL_INSTALL="install-binaries install-libraries"
+VENDOR_TCL_INSTALL="install-binaries install-headers install-libraries install-msgs install-packages"
 AC_SUBST(VENDOR_TCL_SUBDIR)
 AC_SUBST(VENDOR_TCL_INSTALL)
 
 # Set up some variables needed by MacPorts' Tcl setup
 VENDOR_DESTROOT=vendor/vendor-destroot
 AC_SUBST(VENDOR_DESTROOT)
-
-## Tcl Thread package
-# Tcl supports Threads internally, but to use threads from Tcl code we need
-# this package
-MP_CONFIG_SUBDIR([vendor/thread], [--prefix=${macports_libexec_dir}])
-VENDOR_TCLTHREAD_SUBDIR=thread
-VENDOR_TCLTHREAD_INSTALL="install-binaries install-libraries"
-AC_SUBST(VENDOR_TCLTHREAD_SUBDIR)
-AC_SUBST(VENDOR_TCLTHREAD_INSTALL)
 
 ## TclX package
 # TclX is required for signal handling
@@ -384,8 +366,7 @@ SHLIB_CFLAGS=${TCL_SHLIB_CFLAGS}
 SHLIB_SUFFIX=${TCL_SHLIB_SUFFIX}
 TCLSH=${TCL_EXEC_PREFIX}/bin/tclsh${TCL_VERSION}
 INTREE_TCLSH=`(cd vendor; pwd)`/tclsh
-# strip possible whitespace at the end of TCL_PACKAGE_PATH
-eval "TCL_PACKAGE_PATH=${TCL_PACKAGE_PATH}"
+TCL_PACKAGE_PATH="$macports_libexec_dir/lib"
 
 AC_SUBST(SHLIB_LD)
 AC_SUBST(STLIB_LD)
@@ -402,6 +383,12 @@ AC_SUBST(INTREE_TCLSH)
 
 INCLUDES="-I.. -I. $INCLUDES"
 AC_SUBST(INCLUDES)
+
+## sqlite3
+SQLITE3_CPPFLAGS=-I`echo ${TCL_SRC_DIR}/pkgs/sqlite3*/compat/sqlite3`
+SQLITE3_LIBNAME=`basename ${TCL_SRC_DIR}/pkgs/sqlite3*`
+AC_SUBST(SQLITE3_CPPFLAGS)
+AC_SUBST(SQLITE3_LIBNAME)
 
 # Check if there's an existing DP/MP install too old to upgrade
 MP_CHECK_OLDLAYOUT

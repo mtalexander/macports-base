@@ -49,16 +49,23 @@ proc selfupdate::main {{optionslist {}} {updatestatusvar {}}} {
         set updatestatus no
     }
 
+    set rsync_url rsync://${rsync_server}/
     # are we syncing a tarball? (implies detached signature)
     set is_tarball 0
     if {[string range $rsync_dir end-3 end] eq ".tar"} {
         set is_tarball 1
-        set mp_source_path [file join $portdbpath sources $rsync_server [file dirname $rsync_dir]]
+        set tarballs_dir [file dirname $rsync_dir]
+        append rsync_url ${tarballs_dir}/
+        set mp_source_path [file join $portdbpath sources $rsync_server $tarballs_dir]
+        set tarfile [file tail $rsync_dir]
+        set include_options " --include=[macports::shellescape /${tarfile}] --include=[macports::shellescape /${tarfile}.rmd160] --exclude=*"
     } else {
         if {[string index $rsync_dir end] ne "/"} {
             append rsync_dir /
         }
+        append rsync_url $rsync_dir
         set mp_source_path [file join $portdbpath sources $rsync_server $rsync_dir]
+        set include_options ""
     }
     # create the path to the to be downloaded sources if it doesn't exist
     if {![file exists $mp_source_path]} {
@@ -68,31 +75,26 @@ proc selfupdate::main {{optionslist {}} {updatestatusvar {}}} {
 
     # sync the MacPorts sources
     ui_msg "$macports::ui_prefix Updating MacPorts base sources using rsync"
-    try -pass_signal {
-        system "$rsync_path $rsync_options [macports::shellescape rsync://${rsync_server}/$rsync_dir] [macports::shellescape $mp_source_path]"
-    } catch {{*} eCode eMessage} {
+    macports_try -pass_signal {
+        system "$rsync_path ${rsync_options}${include_options} [macports::shellescape $rsync_url] [macports::shellescape $mp_source_path]"
+    } on error {eMessage} {
         error "Error synchronizing MacPorts sources: $eMessage"
     }
 
     if {$is_tarball} {
         # verify signature for tarball
         global macports::archivefetch_pubkeys
-        try -pass_signal {
-            system "$rsync_path $rsync_options [macports::shellescape rsync://${rsync_server}/${rsync_dir}.rmd160] [macports::shellescape $mp_source_path]"
-        } catch {{*} eCode eMessage} {
-            error "Error synchronizing MacPorts source signature: $eMessage"
-        }
         set openssl [macports::findBinary openssl $macports::autoconf::openssl_path]
-        set tarball ${mp_source_path}/[file tail $rsync_dir]
+        set tarball ${mp_source_path}/${tarfile}
         set signature ${tarball}.rmd160
         set verified 0
         foreach pubkey $macports::archivefetch_pubkeys {
-            try -pass_signal {
+            macports_try -pass_signal {
                 exec $openssl dgst -ripemd160 -verify $pubkey -signature $signature $tarball
                 set verified 1
                 ui_debug "successful verification with key $pubkey"
                 break
-            }  catch {{*} eCode eMessage} {
+            } on error {eMessage} {
                 ui_debug "failed verification with key $pubkey"
                 ui_debug "openssl output: $eMessage"
             }
@@ -105,9 +107,9 @@ proc selfupdate::main {{optionslist {}} {updatestatusvar {}}} {
         set tar [macports::findBinary tar $macports::autoconf::tar_path]
         file mkdir ${mp_source_path}/tmp
         set tar_cmd "$tar -C [macports::shellescape ${mp_source_path}/tmp] -xf [macports::shellescape $tarball]"
-        try -pass_signal {
+        macports_try -pass_signal {
             system $tar_cmd
-        } catch {*} {
+        } on error {} {
             error "Failed to extract MacPorts sources from tarball!"
         }
         file delete -force ${mp_source_path}/base
@@ -153,7 +155,7 @@ proc selfupdate::main {{optionslist {}} {updatestatusvar {}}} {
         }
         try {
             mportsync $optionslist
-        }  catch {{*} eCode eMessage} {
+        } on error {eMessage} {
             error "Couldn't sync the ports tree: $eMessage"
         }
     }
@@ -189,6 +191,7 @@ proc selfupdate::main {{optionslist {}} {updatestatusvar {}}} {
             # Choose a sane compiler and SDK
             set cc_arg {}
             set sdk_arg {}
+            set jobs [macports:get_parallel_jobs yes]
             if {$::macports::os_platform eq "darwin"} {
                 set cc_arg "CC=/usr/bin/cc "
                 if {$::macports::os_major >= 18 || ![file exists /usr/include/sys/cdefs.h]} {
@@ -219,8 +222,8 @@ proc selfupdate::main {{optionslist {}} {updatestatusvar {}}} {
             # do the actual configure, build and installation of new base
             ui_msg "Installing new MacPorts release in $prefix as ${owner}:${group}; permissions ${perms}\n"
             try {
-                system -W $mp_source_path "${cc_arg}${sdk_arg}./configure $configure_args && ${sdk_arg}make SELFUPDATING=1 && make install SELFUPDATING=1"
-            } catch {{*} eCode eMessage} {
+                system -W $mp_source_path "${cc_arg}${sdk_arg}./configure $configure_args && ${sdk_arg}make -j${jobs} SELFUPDATING=1 && make install SELFUPDATING=1"
+            } on error {eMessage} {
                 error "Error installing new MacPorts base: $eMessage"
             }
             if {[info exists updatestatus]} {
@@ -238,7 +241,7 @@ proc selfupdate::main {{optionslist {}} {updatestatusvar {}}} {
     ui_debug "Setting MacPorts sources ownership to $sources_owner"
     try {
         exec [macports::findBinary chown $macports::autoconf::chown_path] -R $sources_owner [file join $portdbpath sources/]
-    }  catch {{*} eCode eMessage} {
+    } on error {eMessage} {
         error "Couldn't change permissions of the MacPorts sources at $mp_source_path to ${sources_owner}: $eMessage"
     }
 

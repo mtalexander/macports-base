@@ -382,7 +382,7 @@ proc extract_archive_to_tmpdir {location} {
         if {[catch {cd $extractdir} err]} {
             throw MACPORTS $err
         }
-    
+
         # clagged straight from unarchive... this really needs to be factored
         # out, but it's a little tricky as the places where it's used run in
         # different interpreter contexts with access to different packages.
@@ -509,7 +509,7 @@ proc extract_archive_to_tmpdir {location} {
                 throw MACPORTS "Unsupported port archive type '${unarchive.type}'!"
             }
         }
-        
+
         # and finally, reinvent command_exec
         if {${unarchive.pipe_cmd} eq ""} {
             set cmdstring "${unarchive.cmd} ${unarchive.pre_args} ${unarchive.args}"
@@ -517,9 +517,9 @@ proc extract_archive_to_tmpdir {location} {
             set cmdstring "${unarchive.pipe_cmd} ( ${unarchive.cmd} ${unarchive.pre_args} ${unarchive.args} )"
         }
         system $cmdstring
-    } catch {*} {
+    } on error {_ eOptions} {
         ::file delete -force $extractdir
-        throw
+        throw [dict get $eOptions -errorcode] [dict get $eOptions -errorinfo]
     } finally {
         cd $startpwd
     }
@@ -671,27 +671,27 @@ proc _activate_contents {port {rename_list {}}} {
                 # here so that this information cannot be inconsistent with the
                 # state of the files on disk.
                 $port state installed
-            } catch {{POSIX SIG SIGINT} eCode eMessage} {
+            } trap {POSIX SIG SIGINT} {_ eOptions} {
                 # Pressing ^C will (often?) print "^C" to the terminal; send
                 # a linebreak so our message appears after that.
                 ui_msg ""
                 ui_msg "Control-C pressed, rolling back, please wait."
                 # can't do it here since we're already inside a transaction
                 set deactivate_this yes
-                throw
-            } catch {{POSIX SIG SIGTERM} eCode eMessage} {
+                throw [dict get $eOptions -errorcode] [dict get $eOptions -errorinfo]
+            } trap {POSIX SIG SIGTERM} {_ eOptions} {
                 ui_msg "SIGTERM received, rolling back, please wait."
                 # can't do it here since we're already inside a transaction
                 set deactivate_this yes
-                throw
-            } catch {*} {
+                throw [dict get $eOptions -errorcode] [dict get $eOptions -errorinfo]
+            } on error {_ eOptions} {
                 ui_debug "Activation failed, rolling back."
                 # can't do it here since we're already inside a transaction
                 set deactivate_this yes
-                throw
+                throw [dict get $eOptions -errorcode] [dict get $eOptions -errorinfo]
             }
         }
-    } catch {*} {
+    } on error {_ eOptions} {
         # This code must run to completion, or the installation might be left
         # in an inconsistent state. We store the old signal handling state,
         # block the critical signals and restore to the previous state instead
@@ -727,7 +727,7 @@ proc _activate_contents {port {rename_list {}}} {
             signal set $osignals
         }
 
-        throw
+        throw [dict get $eOptions -errorcode] [dict get $eOptions -errorinfo]
     } finally {
         #foreach entry [array names todeactivate] {
         #    registry::entry close $entry
@@ -835,6 +835,75 @@ proc _deactivate_contents {port imagefiles {force 0} {rollback 0}} {
     } finally {
         # restore the signal block state
         signal set $osignals
+    }
+}
+
+# Create a new registry entry using the given metadata array
+proc install {metadata} {
+    global macports::registry.path
+    array set m $metadata
+    registry::write {
+        # store portfile
+        set portfile_sha256 [sha256 file $m(portfile_path)]
+        set portfile_size [file size $m(portfile_path)]
+        set portfile_reg_dir [file join ${registry.path} registry portfiles $m(name)-$m(version)_$m(revision) ${portfile_sha256}-${portfile_size}]
+        set portfile_reg_path ${portfile_reg_dir}/Portfile
+        file mkdir $portfile_reg_dir
+        if {![file isfile $portfile_reg_path] || [file size $portfile_reg_path] != $portfile_size
+                || [sha256 file $portfile_reg_path] ne $portfile_sha256} {
+            file copy -force $m(portfile_path) $portfile_reg_dir
+            file attributes $portfile_reg_path -permissions 0644
+        }
+
+        # store portgroups
+        if {[info exists m(portgroups)]} {
+            foreach {pgname pgversion groupFile} $m(portgroups) {
+                set pgsha256 [sha256 file $groupFile]
+                set pgsize [file size $groupFile]
+                set pg_reg_dir [file join ${registry.path} registry portgroups ${pgsha256}-${pgsize}]
+                set pg_reg_path ${pg_reg_dir}/${pgname}-${pgversion}.tcl
+                lappend portgroups [list $pgname $pgversion $pgsha256 $pgsize]
+                if {![file isfile $pg_reg_path] || [file size $pg_reg_path] != $pgsize || [sha256 file $pg_reg_path] ne $pgsha256} {
+                    file mkdir $pg_reg_dir
+                    file copy -force $groupFile $pg_reg_dir
+                }
+                file attributes $pg_reg_path -permissions 0644
+            }
+            unset m(portgroups)
+        }
+
+        set regref [registry::entry create $m(name) $m(version) $m(revision) $m(variants) $m(epoch)]
+        $regref installtype image
+        $regref state imaged
+        $regref portfile ${portfile_sha256}-${portfile_size}
+        if {[info exists portgroups]} {
+            foreach p $portgroups {
+                $regref addgroup {*}$p
+            }
+        }
+        foreach dep_portname $m(depends) {
+            $regref depends $dep_portname
+        }
+        if {[info exists m(files)]} {
+            # register files
+            $regref map $m(files)
+            unset m(files)
+        }
+        if {[info exists m(binary)]} {
+            foreach {f isbinary} $m(binary) {
+                set fileref [registry::file open [$regref id] $f]
+                $fileref binary $isbinary
+                registry::file close $fileref
+            }
+            unset m(binary)
+        }
+        unset m(name) m(version) m(revision) m(variants) m(epoch) m(depends) \
+              m(portfile_path)
+
+        # remaining metadata maps directly to reg entry fields
+        foreach key [array names m] {
+            $regref $key $m($key)
+        }
     }
 }
 

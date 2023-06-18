@@ -567,7 +567,7 @@ proc handle_option_string {option action args} {
                 }
 
                 # Remove indent on first line
-                set arg [string replace $arg 0 [expr {$i - 1}]]
+                set arg [string replace $arg 0 $i-1]
                 # Remove indent on each other line
                 set arg [string map "\"\n$indent\" \"\n\"" $arg]
 
@@ -600,7 +600,7 @@ proc variant {args} {
         return -code error "Malformed variant specification"
     }
     set code [lindex $args end]
-    set args [lrange $args 0 [expr {$len - 2}]]
+    set args [lrange $args 0 end-1]
 
     set ditem [variant_new "temp-variant"]
 
@@ -816,7 +816,7 @@ proc platform {args} {
     }
     set code [lindex $args end]
     set os [lindex $args 0]
-    set args [lrange $args 1 [expr {$len - 2}]]
+    set args [lrange $args 1 end-1]
 
     set release_re {(^[0-9]+$)}
     set arch_re {([a-zA-Z0-9]*)}
@@ -842,6 +842,72 @@ proc platform {args} {
     if {$match} {
         uplevel 1 $code
     }
+}
+
+# Check platforms for compatibility
+# Expected format: list of {os operator version}
+# Incompatible if any evaluate to false.
+# Version can be a glob if operator is == or !=.
+proc _handle_platforms {option action args} {
+    global os.platform os.subplatform os.version
+    if {$action ne "set"} {
+        return
+    }
+    set compatible 1
+    foreach p [lindex $args 0] {
+        # Other forms like "darwin" or "darwin any" can exist, but
+        # don't affect this check.
+        if {[llength $p] < 3} {
+            continue
+        }
+        set osname [lindex $p 0]
+        if {${os.platform} eq $osname || ${os.subplatform} eq $osname} {
+            if {[lindex $p 1] ne "any"} {
+                set startindex 1
+            } else {
+                set startindex 2
+            }
+            foreach {op vers} [lrange $p $startindex end] {
+                if {$op eq "=="} {
+                    if {[string match $vers ${os.version}]} {
+                        continue
+                    }
+                    set compatible 0
+                    break
+                } elseif {$op eq "!="} {
+                    if {![string match $vers ${os.version}]} {
+                        continue
+                    }
+                    set compatible 0
+                    break
+                } elseif {![vercmp ${os.version} $op $vers]} {
+                    set compatible 0
+                    break
+                }
+            }
+        }
+        if {!$compatible} {
+            break
+        }
+    }
+    if {!$compatible} {
+        default known_fail yes
+    }
+}
+
+# Platform specifier for binary archive name
+# "any" in platforms means the built archive will work on any OS
+# "darwin any" means it will work on any darwin version
+proc _get_archive_platform {} {
+    global platforms os.platform os.major
+    foreach p $platforms {
+        if {$p eq "any"} {
+            return any_any
+        } elseif {[lindex $p 0] eq ${os.platform} && [lindex $p 1] eq "any"} {
+            return ${os.platform}_any
+        }
+    }
+    return ${os.platform}_${os.major}
 }
 
 # Portfiles may define more than one port.
@@ -1269,8 +1335,17 @@ proc ln {args} {
         set files $args
         set target ./
     } else {
-        set files [lrange $args 0 [expr {[llength $args] - 2}]]
+        set files [lrange $args 0 end-1]
         set target [lindex $args end]
+    }
+
+    set target_dir 0
+    set append_path 0
+    if {[file isdirectory $target]} {
+        set target_dir 1
+        if {[file type $target] ne "link" || ![info exists options(h)]} {
+            set append_path 1
+        }
     }
 
     foreach file $files {
@@ -1278,7 +1353,7 @@ proc ln {args} {
             return -code error "ln: $file: Is a directory"
         }
 
-        if {[file isdirectory $target] && ([file type $target] ne "link" || ![info exists options(h)])} {
+        if {$append_path} {
             set linktarget [file join $target [file tail $file]]
         } else {
             set linktarget $target
@@ -1292,10 +1367,10 @@ proc ln {args} {
             }
         }
 
-        if {[llength $files] > 2} {
-            if {![file exists $linktarget]} {
+        if {[llength $files] > 1} {
+            if {!$append_path && ![file exists $linktarget]} {
                 return -code error "ln: $linktarget: No such file or directory"
-            } elseif {![file isdirectory $target]} {
+            } elseif {!$target_dir} {
                 # this error isn't strictly what BSD ln gives, but I think it's more useful
                 return -code error "ln: $target: Not a directory"
             }
@@ -1636,8 +1711,12 @@ proc target_run {ditem} {
 proc recursive_collect_deps {portname {depsfound {}}} \
 {
     # Get the active port from the registry
-    # There can be only one port active at a time, so take the first result only
-    set regentry [lindex [registry_active $portname] 0]
+    if {[catch {registry_active $portname} result]} {
+        ui_warn "recursive_collect_deps: '$portname' is registered as a dependency but is not active"
+        return $depsfound
+    }
+    # There can be only one port version active at a time, so take the first result only
+    set regentry [lindex $result 0]
     # Get port dependencies from the registry
     set deplist [registry_list_depends [lindex $regentry 0] [lindex $regentry 1] [lindex $regentry 2] [lindex $regentry 3]]
 
@@ -2387,7 +2466,7 @@ proc adduser {name args} {
     if {${os.platform} eq "darwin"} {
         set dscl [findBinary dscl $portutil::autoconf::dscl_path]
         set failed? 0
-        try {
+        macports_try {
             exec -ignorestderr $dscl . -create /Users/${name} UniqueID ${uid}
 
             # These are implicitly added on Mac OS X Lion.  AuthenticationAuthority
@@ -2404,7 +2483,7 @@ proc adduser {name args} {
             exec -ignorestderr $dscl . -create /Users/${name} PrimaryGroupID ${gid}
             exec -ignorestderr $dscl . -create /Users/${name} NFSHomeDirectory ${home}
             exec -ignorestderr $dscl . -create /Users/${name} UserShell ${shell}
-        } catch {{CHILDKILLED *} eCode eMessage} {
+        } on error {{CHILDKILLED *} eCode eMessage} {
             # the foreachs are a simple workaround for Tcl 8.4, which doesn't
             # seem to have lassign
             foreach {- pid sigName msg} $eCode {
@@ -2413,14 +2492,14 @@ proc adduser {name args} {
             }
 
             set failed? 1
-        } catch {{CHILDSTATUS *} eCode eMessage} {
+        } on error {{CHILDSTATUS *} eCode eMessage} {
             foreach {- pid code} $eCode {
                 ui_error "dscl($pid) terminated with an exit status of $code"
                 ui_debug "dscl printed: $eMessage"
             }
             
             set failed? 1
-        } catch {{POSIX *} eCode eMessage} {
+        } on error {{POSIX *} eCode eMessage} {
             foreach {- errName msg} {
                 ui_error "failed to execute $dscl: $errName: $msg"
                 ui_debug "dscl printed: $eMessage"
@@ -2433,17 +2512,17 @@ proc adduser {name args} {
                 # anyway, try to delete the half-created user to revert to the
                 # state before the error
                 ui_debug "Attempting to clean up failed creation of user $name"
-                try {
+                macports_try {
                     exec -ignorestderr $dscl . -delete /Users/${name}
-                } catch {{CHILDKILLED *} eCode eMessage} {
+                } on error {{CHILDKILLED *} eCode eMessage} {
                     foreach {- pid sigName msg} {
                         ui_warn "dscl($pid) was killed by $sigName: $msg while trying to clean up failed creation of user $name."
                         ui_debug "dscl printed: $eMessage"
                     }
-                } catch {{CHILDSTATUS *} eCode eMessage} {
+                } on error {{CHILDSTATUS *} eCode eMessage} {
                     # ignoring childstatus failure, because that probably means
                     # the first call failed and the user wasn't even created
-                } catch {{POSIX *} eCode eMessage} {
+                } on error {{POSIX *} eCode eMessage} {
                     foreach {- errName msg} {
                         ui_warn "failed to execute $dscl: $errName: $msg while trying to clean up failed creation of user $name."
                         ui_debug "dscl printed: $eMessage"
@@ -2503,14 +2582,14 @@ proc addgroup {name args} {
     if {${os.platform} eq "darwin"} {
         set dscl [findBinary dscl $portutil::autoconf::dscl_path]
         set failed? 0
-        try {
+        macports_try {
             exec -ignorestderr $dscl . -create /Groups/${name} Password ${passwd}
             exec -ignorestderr $dscl . -create /Groups/${name} RealName ${realname}
             exec -ignorestderr $dscl . -create /Groups/${name} PrimaryGroupID ${gid}
             if {${users} ne ""} {
                 exec -ignorestderr $dscl . -create /Groups/${name} GroupMembership ${users}
             }
-        } catch {{CHILDKILLED *} eCode eMessage} {
+        } on error {{CHILDKILLED *} eCode eMessage} {
             # the foreachs are a simple workaround for Tcl 8.4, which doesn't
             # seem to have lassign
             foreach {- pid sigName msg} $eCode {
@@ -2519,14 +2598,14 @@ proc addgroup {name args} {
             }
 
             set failed? 1
-        } catch {{CHILDSTATUS *} eCode eMessage} {
+        } on error {{CHILDSTATUS *} eCode eMessage} {
             foreach {- pid code} $eCode {
                 ui_error "dscl($pid) terminated with an exit status of $code"
                 ui_debug "dscl printed: $eMessage"
             }
             
             set failed? 1
-        } catch {{POSIX *} eCode eMessage} {
+        } on error {{POSIX *} eCode eMessage} {
             foreach {- errName msg} {
                 ui_error "failed to execute $dscl: $errName: $msg"
                 ui_debug "dscl printed: $eMessage"
@@ -2539,17 +2618,17 @@ proc addgroup {name args} {
                 # anyway, try to delete the half-created user to revert to the
                 # state before the error
                 ui_debug "Attempting to clean up failed creation of group $name"
-                try {
+                macports_try {
                     exec -ignorestderr $dscl . -delete /Groups/${name}
-                } catch {{CHILDKILLED *} eCode eMessage} {
+                } on error {{CHILDKILLED *} eCode eMessage} {
                     foreach {- pid sigName msg} {
                         ui_warn "dscl($pid) was killed by $sigName: $msg while trying to clean up failed creation of group $name."
                         ui_debug "dscl printed: $eMessage"
                     }
-                } catch {{CHILDSTATUS *} eCode eMessage} {
+                } on error {{CHILDSTATUS *} eCode eMessage} {
                     # ignoring childstatus failure, because that probably means
                     # the first call failed and the user wasn't even created
-                } catch {{POSIX *} eCode eMessage} {
+                } on error {{POSIX *} eCode eMessage} {
                     foreach {- errName msg} {
                         ui_warn "failed to execute $dscl: $errName: $msg while trying to clean up failed creation of group $name."
                         ui_debug "dscl printed: $eMessage"
@@ -2606,6 +2685,23 @@ proc set_ui_prefix {} {
 proc PortGroup {group version} {
     global porturl PortInfo _portgroup_search_dirs subport
 
+    if {[info exists PortInfo(portgroups)]} {
+        set existing_list [lsearch -all -exact -index 0 -inline $PortInfo(portgroups) $group]
+        set should_return 0
+        foreach existing $existing_list {
+            set ex_vers [lindex $existing 1]
+            if {$ex_vers eq $version} {
+                ui_debug "PortGroup $group $version included previously, not sourcing again"
+                set should_return 1
+            } else {
+                ui_warn "PortGroup $group $version included, but version $ex_vers was included previously"
+            }
+        }
+        if {$should_return} {
+            return
+        }
+    }
+
     if {[info exists _portgroup_search_dirs]} {
         foreach dir $_portgroup_search_dirs {
             set groupFile ${dir}/${group}-${version}.tcl
@@ -2632,13 +2728,13 @@ proc PortGroup {group version} {
 
 # return filename of the archive for this port
 proc get_portimage_name {} {
-    global subport version revision portvariants os.platform os.major portarchivetype
-    set ret "${subport}-${version}_${revision}${portvariants}.${os.platform}_${os.major}.[join [get_canonical_archs] -].${portarchivetype}"
+    global subport version revision portvariants portarchivetype
+    set ret "${subport}-${version}_${revision}${portvariants}.[_get_archive_platform].[join [get_canonical_archs] -].${portarchivetype}"
     # should really look up NAME_MAX here, but it's 255 for all macOS so far
     # (leave 10 chars for an extension like .rmd160 on the sig file)
     if {[string length $ret] > 245 && ${portvariants} ne ""} {
         # try hashing the variants
-        set ret "${subport}-${version}_${revision}+[rmd160 string ${portvariants}].${os.platform}_${os.major}.[join [get_canonical_archs] -].${portarchivetype}"
+        set ret "${subport}-${version}_${revision}+[rmd160 string ${portvariants}].[_get_archive_platform].[join [get_canonical_archs] -].${portarchivetype}"
     }
     if {[string length $ret] > 245} {
         error "filename too long: $ret"
@@ -3034,7 +3130,7 @@ proc fileAttrsAsRoot {file attributes} {
         }
     } else {
         # not root, so can't set owner/group
-        set permissions [lindex $attributes [expr {[lsearch $attributes "-permissions"] + 1}]]
+        set permissions [lindex $attributes [lsearch -exact $attributes "-permissions"]+1]
         file attributes $file -permissions $permissions
     }
 }
@@ -3157,7 +3253,7 @@ proc _libtest {depspec {return_match 0}} {
 
     set i [string first . $depline]
     if {$i < 0} {set i [string length $depline]}
-    set depname [string range $depline 0 [expr {$i - 1}]]
+    set depname [string range $depline 0 $i-1]
     set depversion [string range $depline $i end]
     regsub {\.} $depversion {\.} depversion
     if {${os.platform} eq "darwin"} {
@@ -3359,12 +3455,17 @@ proc _check_xcode_version {} {
             12 {
                 set min 13.1
                 set ok 13.1
-                set rec 13.2.1
+                set rec 13.4.1
+            }
+            13 {
+                set min 14.1
+                set ok 14.1
+                set rec 14.2
             }
             default {
-                set min 13.1
-                set ok 13.1
-                set rec 13.2.1
+                set min 14.1
+                set ok 14.1
+                set rec 14.2
             }
         }
         if {$xcodeversion eq "none"} {
@@ -3395,7 +3496,7 @@ proc _check_xcode_version {} {
             }
 
             # Check whether /usr/include and /usr/bin/make exist and tell users to install the command line tools, if they don't
-            if {${os.major} <= 17 && (![file isdirectory [file join $cltpath usr include]] || ![file executable  [file join $cltpath usr bin make]])} {
+            if {${os.major} <= 17 && (![file isdirectory [file join $cltpath usr include]] || ![file executable [file join $cltpath usr bin make]])} {
                 if {[vercmp $xcodeversion 10.0] >= 0} {
                     ui_warn "System headers do not appear to be installed. Ports may not build correctly due to Xcode 10 only providing a 10.14 SDK."
                 } else {
@@ -3409,15 +3510,21 @@ proc _check_xcode_version {} {
                 }
             }
 
-            if {${os.major} >= 18 && [option configure.sdk_version] ne "" &&
-                ![string match MacOSX[option configure.sdk_version]*.sdk [file tail [option configure.sdkroot]]]} {
-                if { [option configure.sdkroot] eq "" } {
-                    ui_warn "The macOS [option configure.sdk_version] SDK is requested but configure.sdkroot is set to"
-                    ui_warn "a NULL string. Ports may not build correctly with this configuration."
-                } else {
-                    ui_warn "The macOS [option configure.sdk_version] SDK does not appear to be match the configured"
-                    ui_warn "SDKROOT '[option configure.sdkroot]'. Ports may not build correctly."
-                    ui_warn "You can install it as part of the Xcode Command Line Tools package by running `xcode-select --install'."
+            if {${os.major} >= 18} {
+                global xcodecltversion configure.sdk_version macosx_sdk_version
+                if {$xcodecltversion eq "none" && [file executable [file join $cltpath usr bin make]]} {
+                    ui_warn "The Xcode Command Line Tools package appears to be installed, but its receipt appears to be missing."
+                    ui_warn "The Command Line Tools may be outdated, which can cause problems."
+                    ui_warn "Please see: <https://trac.macports.org/wiki/ProblemHotlist#reinstall-clt>"
+                } elseif {${configure.sdk_version} ne "" && ![string match MacOSX${configure.sdk_version}*.sdk \
+                        [file tail [portconfigure::configure_get_sdkroot ${configure.sdk_version}]]]} {
+                    if {${configure.sdk_version} eq ${macosx_sdk_version}} {
+                        ui_warn "The macOS ${configure.sdk_version} SDK does not appear to be installed. Ports may not build correctly."
+                        ui_warn "You can install it as part of the Xcode Command Line Tools package by running `xcode-select --install'."
+                        ui_warn "If already installed, update with Software Update, or manually: <https://trac.macports.org/wiki/ProblemHotlist#reinstall-clt>"
+                    } else {
+                        ui_warn "The macOS ${configure.sdk_version} SDK does not appear to be installed. This port may not build correctly."
+                    }
                 }
             }
 

@@ -77,7 +77,25 @@ option_proc configure.objcxxflags portconfigure::stdlib_trace
 proc portconfigure::should_add_stdlib {} {
     set has_stdlib [expr {[option configure.cxx_stdlib] ne ""}]
     set is_clang [string match *clang* [option configure.cxx]]
-    return [expr {$has_stdlib && $is_clang}]
+    # GCC also supports -stdlib starting with GCC 10 (and devel)
+    set is_gcc_with_stdlib no
+    if { [string match *g*-mp-* [option configure.cxx]] } {
+        # -stdlib is not available with PPC builds
+        if { [option configure.build_arch] ni [list ppc ppc64] } {
+            # Do not pass stdlib to gcc if it is MacPorts custom macports-libstdc++ setting
+            # as gcc does not uderstand this. Instead do nothing, which means gcc will
+            # default to using its own libstdc++, which is in fact what we mean by
+            # configure.cxx_stdlib=macports-libstdc++
+            if { [option configure.cxx_stdlib] ne "macports-libstdc++" } {
+                # Extract gcc version from value after last -
+                set gcc_ver [lindex [split [option configure.cxx] "-"] end]
+                if { ${gcc_ver} eq "devel" || ${gcc_ver} >= 10 } {
+                    set is_gcc_with_stdlib yes
+                }
+            }
+        }
+    }
+    return [expr {$has_stdlib && ($is_clang || $is_gcc_with_stdlib)}]
 }
 proc portconfigure::should_add_cxx_abi {} {
     # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
@@ -706,7 +724,8 @@ proc portconfigure::arch_flag_supported {compiler {multiple_arch_flags no}} {
         return [regexp {^gcc-4|llvm|apple|clang} ${compiler}]
     } else {
         # GCC prior to 4.7 does not accept -arch flag
-        if {[regexp {^macports(?:-[^-]+)?-gcc-4\.[0-6]} ${compiler}]} {
+        if {[regexp {^macports(?:-[^-]+)?-gcc-4\.[0-6]} ${compiler}]
+                || ([option os.subplatform] ne "macosx" && ${compiler} in {cc gcc})} {
             return no
         } else {
             return yes
@@ -843,14 +862,15 @@ proc portconfigure::max_version {verA verB} {
 # https://en.cppreference.com/w/cpp/compiler_support
 # Xcode release notes
 # https://trac.macports.org/wiki/XcodeVersionInfo
-#--------------------------------------------------------------------
-#| C++ Standard |   Clang   |  Xcode Clang  |   Xcode   |    GCC    |
-#|------------------------------------------------------------------|
-#| 1998 (C++98) |     -     |       -       |     -     |     -     |
-#| 2011 (C++11) |    3.3    |   500.2.75    |    5.0    |   4.8.1   |
-#| 2014 (C++14) |    3.4    |   602.0.49    |    6.3    |     5     |
-#| 2017 (C++17) |    5.0    |  1000.11.45.2 |   10.0    |     7     |
-#--------------------------------------------------------------------
+#-----------------------------------------------------------------------
+#| C++ Standard |   Clang   |  Xcode Clang   |   Xcode   |     GCC     |
+#|---------------------------------------------------------------------|
+#| 1998 (C++98) |     -     |       -        |     -     |      -      |
+#| 2011 (C++11) |    3.3    |   500.2.75     |    5.0    |    4.8.1    |
+#| 2014 (C++14) |    3.4    |   602.0.49     |    6.3    |      5      |
+#| 2017 (C++17) |    5.0    |  1000.11.45.2  |   10.0    |      7      |
+#| 2020 (C++20) |    16     |  1500(?)       |   15.0(?) |     12      |
+#-----------------------------------------------------------------------
 #
 # https://openmp.llvm.org
 # https://gcc.gnu.org/wiki/openmp
@@ -908,7 +928,9 @@ proc portconfigure::get_min_command_line {compiler} {
             } elseif {${compiler.c_standard} >= 2011} {
                 set min_value [max_version $min_value 500.2.75]
             }
-            if {${compiler.cxx_standard} >= 2017} {
+            if {${compiler.cxx_standard} >= 2020} {
+                set min_value [max_version $min_value 1500]
+            } elseif {${compiler.cxx_standard} >= 2017} {
                 set min_value [max_version $min_value 1000.11.45.2]
             } elseif {${compiler.cxx_standard} >= 2014} {
                 set min_value [max_version $min_value 602.0.49]
@@ -961,7 +983,9 @@ proc portconfigure::get_min_clang {} {
     } elseif {${compiler.c_standard} >= 2011} {
         set min_value [max_version $min_value 3.1]
     }
-    if {${compiler.cxx_standard} >= 2017} {
+    if {${compiler.cxx_standard} >= 2020} {
+        set min_value [max_version $min_value 16]
+    } elseif {${compiler.cxx_standard} >= 2017} {
         set min_value [max_version $min_value 5.0]
     } elseif {${compiler.cxx_standard} >= 2014} {
         if {[option configure.cxx_stdlib] eq "libc++"} {
@@ -1006,10 +1030,12 @@ proc portconfigure::get_min_gcc {} {
         set min_value [max_version $min_value 8]
     } elseif {${compiler.c_standard} >= 2011} {
         set min_value [max_version $min_value 4.3]
-    }  elseif {${compiler.c_standard} >= 1999} {
+    } elseif {${compiler.c_standard} >= 1999} {
         set min_value [max_version $min_value 4.0]
     }
-    if {${compiler.cxx_standard} >= 2017} {
+    if {${compiler.cxx_standard} >= 2020} {
+        set min_value [max_version $min_value 12]
+    } elseif {${compiler.cxx_standard} >= 2017} {
         set min_value [max_version $min_value 7]
     } elseif {${compiler.cxx_standard} >= 2014} {
         set min_value [max_version $min_value 5]
@@ -1101,37 +1127,37 @@ proc portconfigure::get_apple_compilers_xcode_version {} {
     # attempt to include all available compilers except gcc-3*
     # attempt to have the default compilers first
     if {[vercmp ${xcodeversion} 5] >= 0} {
-        set compilers {clang}
+        set compilers [list clang]
     } elseif {[vercmp ${xcodeversion} 4.3] >= 0} {
-        set compilers {clang llvm-gcc-4.2}
+        set compilers [list clang llvm-gcc-4.2]
     } elseif {[vercmp ${xcodeversion} 4.2] >= 0} {
         # llvm-gcc is more reliable
         # see https://github.com/macports/macports-base/commit/10d62cb51b1f0f9703a873173bac468eee69d01a
-        set compilers {llvm-gcc-4.2 clang}
+        set compilers [list llvm-gcc-4.2 clang]
     } elseif {[vercmp ${xcodeversion} 4.0] >= 0} {
-        set compilers {llvm-gcc-4.2 clang gcc-4.2}
+        set compilers [list llvm-gcc-4.2 clang gcc-4.2]
     } else {
         # Legacy Cases
         if {[string match *10.4u* [option configure.sdkroot]]} {
             # from Xcode 3.2 release notes:
             #    GCC 4.2 cannot be used with the Mac OS X 10.4u SDK.
             #    If you want to build targets using the 10.4u SDK on Xcode 3.2, you must set the Compiler Version to GCC 4.0
-            set compilers {gcc-4.0}
+            set compilers [list gcc-4.0]
         } else {
             if {[vercmp ${xcodeversion} 3.2] >= 0} {
                 # from about_xcode_3.2.pdf:
                 #    GCC 4.2 is the primary system compiler for the 10.6 SDK
                 # clang does *not* provide clang++, but configure.cxx will fall back to llvm-g++-4.2
-                set compilers {gcc-4.2 llvm-gcc-4.2 clang gcc-4.0}
+                set compilers [list gcc-4.2 llvm-gcc-4.2 clang gcc-4.0]
             } elseif {[vercmp ${xcodeversion} 3.1] >= 0} {
                 # from about_xcode_tools_3.1.pdf:
                 #     GCC 4.2 & LLVM GCC 4.2 optional compilers
                 # assume they exist
-                set compilers {gcc-4.2 llvm-gcc-4.2 apple-gcc-4.2 gcc-4.0}
+                set compilers [list gcc-4.2 llvm-gcc-4.2 apple-gcc-4.2 gcc-4.0]
             } elseif {[vercmp ${xcodeversion} 3.0] >= 0} {
-                set compilers {apple-gcc-4.2 gcc-4.0}
+                set compilers [list apple-gcc-4.2 gcc-4.0]
             } else {
-                set compilers {apple-gcc-4.2 gcc-4.0}
+                set compilers [list apple-gcc-4.2 gcc-4.0]
             }
         }
     }
@@ -1142,18 +1168,18 @@ proc portconfigure::get_apple_compilers_os_version {} {
     global os.major
     if {${os.major} >= 13} {
         # 5.0.1 <= Xcode
-        set test_compilers {clang}
+        set test_compilers [list clang]
     } elseif {${os.major} >= 12} {
         # 4.4 <= Xcode <= 5.1.1
-        set test_compilers {clang llvm-gcc-4.2}
+        set test_compilers [list clang llvm-gcc-4.2]
     } elseif {${os.major} >= 11} {
         # 4.1 <= Xcode <= 4.6.3
-        set test_compilers {clang llvm-gcc-4.2 gcc-4.2}
+        set test_compilers [list clang llvm-gcc-4.2 gcc-4.2]
     } else {
         # Command Line Tools is only available for Mac OS X 10.7 Lion and above
-        set test_compilers ""
+        set test_compilers [list]
     }
-    set compilers ""
+    set compilers [list]
     foreach cc ${test_compilers} {
         if {[file executable [find_developer_tool $cc]]} {
             lappend compilers $cc
@@ -1164,7 +1190,7 @@ proc portconfigure::get_apple_compilers_os_version {} {
 # utility procedure: get Clang compilers based on os.major
 proc portconfigure::get_clang_compilers {} {
     global os.major porturl
-    set compilers ""
+    set compilers [list]
     set compiler_file [getportresourcepath $porturl "port1.0/compilers/clang_compilers.tcl"]
     if {[file exists ${compiler_file}]} {
         source ${compiler_file}
@@ -1212,7 +1238,7 @@ proc portconfigure::get_clang_compilers {} {
 # utility procedure: get GCC compilers based on os.major
 proc portconfigure::get_gcc_compilers {} {
     global os.major os.arch porturl
-    set compilers ""
+    set compilers [list]
     set compiler_file [getportresourcepath $porturl "port1.0/compilers/gcc_compilers.tcl"]
     if {[file exists ${compiler_file}]} {
         source ${compiler_file}
@@ -1272,28 +1298,33 @@ proc portconfigure::get_compiler_fallback {} {
         return $default_compilers
     }
 
-    # Check for platforms without Xcode
-    if {$xcodeversion eq "none" || $xcodeversion eq ""} {
-        set available_apple_compilers [portconfigure::get_apple_compilers_os_version]
-    } else {
-        set available_apple_compilers [portconfigure::get_apple_compilers_xcode_version]
-    }
-    set system_compilers ""
-    foreach c ${available_apple_compilers} {
-        set vmin [portconfigure::get_min_command_line $c]
-        if {$vmin ne "none"} {
-            if {$c eq "apple-gcc-4.2"} {
-                # provided by a port, should be the latest version
-                lappend system_compilers $c
-                continue
-            }
-            set v [compiler.command_line_tools_version $c]
-            if {[vercmp ${vmin} $v] <= 0} {
-                lappend system_compilers $c
+    if {[option os.subplatform] eq "macosx"} {
+        # Check for macOS without Xcode (i.e. CLTs only)
+        if {$xcodeversion eq "none" || $xcodeversion eq ""} {
+            set available_apple_compilers [portconfigure::get_apple_compilers_os_version]
+        } else {
+            set available_apple_compilers [portconfigure::get_apple_compilers_xcode_version]
+        }
+        set system_compilers [list]
+        foreach c ${available_apple_compilers} {
+            set vmin [portconfigure::get_min_command_line $c]
+            if {$vmin ne "none"} {
+                if {$c eq "apple-gcc-4.2"} {
+                    # provided by a port, should be the latest version
+                    lappend system_compilers $c
+                    continue
+                }
+                set v [compiler.command_line_tools_version $c]
+                if {[vercmp ${vmin} $v] <= 0} {
+                    lappend system_compilers $c
+                }
             }
         }
+    } else {
+        # not macosx
+        set system_compilers [list cc]
     }
-    set clang_compilers ""
+    set clang_compilers [list]
     set vmin [portconfigure::get_min_clang]
     foreach c [portconfigure::get_clang_compilers] {
         set v    [lindex [split $c -] 2]
@@ -1301,7 +1332,7 @@ proc portconfigure::get_compiler_fallback {} {
             lappend clang_compilers $c
         }
     }
-    set gcc_compilers ""
+    set gcc_compilers [list]
     set vmin [portconfigure::get_min_gcc]
     if {$vmin ne "none"} {
         foreach c [portconfigure::get_gcc_compilers] {
@@ -1311,10 +1342,14 @@ proc portconfigure::get_compiler_fallback {} {
             }
         }
     }
-    set compilers ""
+    set compilers [list]
     lappend compilers {*}${system_compilers}
     # when building for PowerPC architectures, prefer GCC to Clang
-    if {[option configure.build_arch] eq "ppc" || [option configure.build_arch] eq "ppc64"} {
+    set cur_arch [option configure.build_arch]
+    if {$cur_arch eq ""} {
+        set cur_arch [option build_arch]
+    }
+    if {$cur_arch in [list ppc ppc64]} {
         lappend compilers {*}${gcc_compilers}
         lappend compilers {*}${clang_compilers}
     } else {
@@ -1325,7 +1360,7 @@ proc portconfigure::get_compiler_fallback {} {
     if {[option compiler.mpi] eq ""} {
         return $compilers
     } else {
-        set mpi_compilers ""
+        set mpi_compilers [list]
         foreach mpi [option compiler.mpi] {
             foreach c ${compilers} {
                 lappend mpi_compilers [portconfigure::get_mpi_wrapper $mpi $c]
@@ -1336,7 +1371,7 @@ proc portconfigure::get_compiler_fallback {} {
 }
 #
 proc portconfigure::get_fortran_fallback {} {
-    set compilers ""
+    set compilers [list]
     set vmin [portconfigure::get_min_gfortran]
     foreach c [portconfigure::get_gcc_compilers] {
         set v    [lindex [split $c -] 2]
@@ -1351,7 +1386,7 @@ proc portconfigure::get_fortran_fallback {} {
     if {[option compiler.mpi] eq ""} {
         return $compilers
     } else {
-        set mpi_compilers ""
+        set mpi_compilers [list]
         foreach mpi [option compiler.mpi] {
             foreach c ${compilers} {
                 lappend mpi_compilers [portconfigure::get_mpi_wrapper $mpi $c]
@@ -1841,7 +1876,7 @@ proc portconfigure::check_implicit_function_declarations {} {
 
             if {![catch {set result [exec -- {*}$args]}]} {
                 foreach line [split $result "\n"] {
-                    if {[regexp -- "(?:implicit declaration of function|implicitly declaring library function) '(\[^']+)'" $line -> function]} {
+                    if {[regexp -- "(?:implicit declaration of function|implicitly declaring library function|call to undeclared function|call to undeclared library function) '(\[^']+)'" $line -> function]} {
                         set is_whitelisted no
                         foreach whitelisted ${configure.checks.implicit_function_declaration.whitelist} {
                             if {[string match -nocase $whitelisted $function]} {
@@ -1869,7 +1904,7 @@ proc portconfigure::check_implicit_function_declarations {} {
 }
 
 proc portconfigure::load_implicit_function_declaration_whitelist {sdk_version} {
-    set whitelist {}
+    set whitelist [list]
 
     set whitelist_file [getdefaultportresourcepath "port1.0/checks/implicit_function_declaration/macosx${sdk_version}.sdk.list"]
     if {[file exists $whitelist_file]} {

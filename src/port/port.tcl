@@ -3005,10 +3005,13 @@ proc action_deps { action portlist opts } {
     set separator ""
 
     foreachport $portlist {
-        if {[info exists options(ports_${action}_no-build)] && [string is true -strict $options(ports_${action}_no-build)]} {
-            set deptypes {depends_lib depends_run}
-        } else {
-            set deptypes {depends_fetch depends_extract depends_patch depends_build depends_lib depends_run depends_test}
+        set deptypes [list]
+        if {!([info exists options(ports_${action}_no-build)] && [string is true -strict $options(ports_${action}_no-build)])} {
+            lappend deptypes depends_fetch depends_extract depends_patch depends_build
+        }
+        lappend deptypes depends_lib depends_run
+        if {!([info exists options(ports_${action}_no-test)] && [string is true -strict $options(ports_${action}_no-test)])} {
+            lappend deptypes depends_test
         }
 
         array unset portinfo
@@ -4183,8 +4186,35 @@ proc action_target { action portlist opts } {
             }
         }
 
-        # if installing, mark the port as explicitly requested
         if {$action eq "install"} {
+            if {[info exists portinfo(replaced_by)] && ![info exists options(ports_install_no-replace)]} {
+                ui_notice "$portname is replaced by $portinfo(replaced_by)"
+                set portname $portinfo(replaced_by)
+                array unset portinfo
+                if {[catch {mportlookup $portname} result]} {
+                    ui_debug $::errorInfo
+                    break_softcontinue "lookup of portname $portname failed: $result" 1 status
+                } elseif {[llength $result] < 2} {
+                    break_softcontinue "Port $portname not found" 1 status
+                }
+                array set portinfo [lindex $result 1]
+                set porturl $portinfo(porturl)
+            }
+            if {[info exists portinfo(known_fail)] && [string is true -strict $portinfo(known_fail)]
+                && ![info exists options(ports_install_allow-failing)]} {
+                if {[info exists macports::ui_options(questions_yesno)]} {
+                    set retvalue [$macports::ui_options(questions_yesno) "$portname is known to fail." "KnownFail" {} {n} 0 "Try to install anyway?"]
+                    if {$retvalue != 0} {
+                        break_softcontinue "$portname is known to fail" 1 status
+                    }
+                } else {
+                    break_softcontinue "$portname is known to fail (use --allow-failing to try to install anyway)" 1 status
+                }
+            }
+            if {[info exists options(ports_install_allow-failing)]} {
+                set options(ignore_known_fail) 1
+            }
+            # mark the port as explicitly requested
             if {![info exists options(ports_install_unrequested)]} {
                 set options(ports_requested) 1
             }
@@ -4457,8 +4487,8 @@ array set cmd_opts_array {
                  maintainer maintainers name patchfiles platform platforms portdir
                  pretty replaced_by revision subports variant variants version}
     contents    {size {units 1}}
-    deps        {index no-build}
-    rdeps       {index no-build full}
+    deps        {index no-build no-test}
+    rdeps       {index no-build no-test full}
     rdependents {full}
     search      {case-sensitive category categories depends_fetch
                  depends_extract depends_patch
@@ -4470,7 +4500,7 @@ array set cmd_opts_array {
     space       {{units 1} total}
     activate    {no-exec}
     deactivate  {no-exec}
-    install     {no-rev-upgrade unrequested}
+    install     {allow-failing no-replace no-rev-upgrade unrequested}
     uninstall   {follow-dependents follow-dependencies no-exec}
     variants    {index}
     clean       {all archive dist work logs}
@@ -4714,10 +4744,10 @@ proc process_cmd { argv } {
 
         try {
             set locked [lock_reg_if_needed $action]
-        } catch {{POSIX SIG SIGINT} eCode eMessage} {
+        } trap {POSIX SIG SIGINT} {} {
             set action_status 1
             break
-        } catch {{POSIX SIG SIGTERM} eCode eMessage} {
+        } trap {POSIX SIG SIGTERM} {} {
             set action_status 1
             break
         }
@@ -5405,11 +5435,11 @@ namespace eval portclient::questions {
         while {$timeout >= 0} {
             try {
                 set inp [read stdin]
-            } catch {*} {
+            } on error {_ eOptions} {
                 # An error occurred, print a newline so the error message
                 # doesn't occur on the prompt line and re-throw
                 puts ""
-                throw
+                throw [dict get $eOptions -errorcode] [dict get $eOptions -errorinfo]
             }
             if {$inp eq "\n"} {
                 return $def
@@ -5512,11 +5542,11 @@ namespace eval portclient::questions {
             signal error {TERM INT}
             try {
                 set input [gets stdin]
-            } catch {*} {
+            } on error {_ eOptions} {
                 # An error occurred, print a newline so the error message
                 # doesn't occur on the prompt line and re-throw
                 puts ""
-                throw
+                throw [dict get $eOptions -errorcode] [dict get $eOptions -errorinfo]
             }
             signal -restart error {TERM INT}
             if {$input in {y Y}} {
@@ -5551,11 +5581,11 @@ namespace eval portclient::questions {
             signal error {TERM INT}
             try {
                 set input [gets stdin]
-            } catch {*} {
+            } on error {_ eOptions} {
                 # An error occurred, print a newline so the error message
                 # doesn't occur on the prompt line and re-throw
                 puts ""
-                throw
+                throw [dict get $eOptions -errorcode] [dict get $eOptions -errorinfo]
             }
             signal -restart error {TERM INT}
             if {[string is wideinteger -strict $input] && $input <= [llength $ports] && $input > 0} {
@@ -5592,11 +5622,11 @@ namespace eval portclient::questions {
             signal error {TERM INT}
             try {
                 set input [gets stdin]
-            } catch {*} {
+            } on error {_ eOptions} {
                 # An error occurred, print a newline so the error message
                 # doesn't occur on the prompt line and re-throw
                 puts ""
-                throw
+                throw [dict get $eOptions -errorcode] [dict get $eOptions -errorinfo]
             }
             signal -restart error {TERM INT}
             # check if input is non-empty and otherwise fine
@@ -5690,11 +5720,11 @@ namespace eval portclient::questions {
             signal error {TERM INT}
             try {
                 set input [gets stdin]
-            } catch {*} {
+            } on error {_ eOptions} {
                 # An error occurred, print a newline so the error message
                 # doesn't occur on the prompt line and re-throw
                 puts ""
-                throw
+                throw [dict get $eOptions -errorcode] [dict get $eOptions -errorinfo]
             }
             set input [string tolower $input]
             if {[info exists alternatives($input)]} {
@@ -5827,17 +5857,17 @@ if { [llength $remaining_args] > 0 } {
     try {
         # If there are remaining arguments, process those as a command
         set exit_status [process_cmd $remaining_args]
-    } catch {{POSIX SIG SIGINT} eCode eMessage} {
+    } trap {POSIX SIG SIGINT} {} {
         ui_debug "process_cmd aborted: $::errorInfo"
         ui_error [msgcat::mc "Aborted: SIGINT received."]
         set exit_status 2
         set aborted_by_signal yes
-    } catch {{POSIX SIG SIGTERM} eCode eMessage} {
+    } trap {POSIX SIG SIGTERM} {} {
         ui_debug "process_cmd aborted: $::errorInfo"
         ui_error [msgcat::mc "Aborted: SIGTERM received."]
         set exit_status 2
         set aborted_by_signal yes
-    } catch {{*} eCode eMessage} {
+    } on error {eMessage} {
         ui_debug "process_cmd failed: $::errorInfo"
         ui_error [msgcat::mc "process_cmd failed: %s" $eMessage]
         set exit_status 1
@@ -5849,15 +5879,15 @@ if { ($exit_status == 0 || [macports::ui_isset ports_processall]) && [info exist
         && ![info exists aborted_by_signal]} {
     try {
         set exit_status [process_command_files $ui_options(ports_commandfiles)]
-    } catch {{POSIX SIG SIGINT} eCode eMessage} {
+    } trap {POSIX SIG SIGINT} {} {
         ui_debug "process_command_files aborted: $::errorInfo"
         ui_error [msgcat::mc "Aborted: SIGINT received."]
         set exit_status 2
-    } catch {{POSIX SIG SIGTERM} eCode eMessage} {
+    } trap {POSIX SIG SIGTERM} {} {
         ui_debug "process_command_files aborted: $::errorInfo"
         ui_error [msgcat::mc "Aborted: SIGTERM received."]
         set exit_status 2
-    } catch {{*} eCode eMessage} {
+    } on error {eMessage} {
         ui_debug "process_command_files failed: $::errorInfo"
         ui_error [msgcat::mc "process_command_files failed: %s" $eMessage]
         set exit_status 1

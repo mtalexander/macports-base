@@ -41,7 +41,6 @@ target_requires ${org.macports.fetch} main
 target_prerun ${org.macports.fetch} portfetch::fetch_start
 
 namespace eval portfetch {
-    namespace export suffix
     variable fetch_urls {}
 }
 
@@ -222,9 +221,6 @@ proc portfetch::suffix {distname} {
     global extract.suffix
     return ${distname}[join ${extract.suffix}]
 }
-# XXX import suffix into the global namespace as it is currently used from
-# Portfiles, but should better go somewhere else
-namespace import portfetch::suffix
 
 # Checks patch files and their tags to assemble url lists for later fetching
 proc portfetch::checkpatchfiles {urls} {
@@ -421,6 +417,10 @@ proc portfetch::svnfetch {args} {
         append svn.url "@${svn.revision}"
     }
 
+    if {[option fetch.ignore_sslcert]} {
+        svn.pre_args-append --trust-server-cert
+    }
+
     set proxy_args [svn_proxy_args ${svn.url}]
 
     set svn.args "${svn.method} ${svn.args} ${proxy_args} ${svn.url}"
@@ -546,12 +546,12 @@ proc portfetch::fetchfiles {args} {
             foreach site $urlmap($url_var) {
                 ui_notice "$UI_PREFIX [format [msgcat::mc "Attempting to fetch %s from %s"] $distfile $site]"
                 set file_url [portfetch::assemble_url $site $distfile]
-                try -pass_signal {
+                macports_try -pass_signal {
                     curl fetch {*}$fetch_options $file_url "${distpath}/${distfile}.TMP"
                     file rename -force "${distpath}/${distfile}.TMP" "${distpath}/${distfile}"
                     set fetched 1
                     break
-                } catch {{*} eCode eMessage} {
+                } on error {eMessage} {
                     ui_debug [msgcat::mc "Fetching distfile failed: %s" $eMessage]
                     set lastError $eMessage
                 } finally {
@@ -596,7 +596,9 @@ proc portfetch::fetch_addfilestomap {filemapname} {
 proc portfetch::fetch_init {args} {
     variable fetch_urls
 
-    portfetch::checkfiles fetch_urls
+    if {${fetch_urls} eq ""} {
+        portfetch::checkfiles fetch_urls
+    }
 }
 
 proc portfetch::fetch_start {args} {

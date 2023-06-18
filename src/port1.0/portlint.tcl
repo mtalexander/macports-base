@@ -48,6 +48,7 @@ set lint_portsystem \
     "1.0"
 
 set lint_platforms [list \
+    "any" \
     "darwin" \
     "freebsd" \
     "linux" \
@@ -126,19 +127,21 @@ proc portlint::lint_checksum_type_list {types} {
     set issues [list]
     set using_secure false
 
-    foreach preferred $portchecksum::default_checksum_types {
+    foreach preferred $portchecksum::secure_checksum_types {
         if {$preferred ni $types} {
             lappend issues "missing recommended checksum type: $preferred"
-        } elseif {$preferred in $portchecksum::secure_checksum_types} {
+        } else {
             set using_secure true
         }
+    }
+    global ports_lint_nitpick
+    if {[tbool ports_lint_nitpick] && "size" ni $types} {
+        lappend issues "missing recommended checksum type: size"
     }
 
     if {!$using_secure} {
         foreach type $types {
-            if {$type ni $portchecksum::default_checksum_types} {
-                lappend issues "checksum type is insecure on its own: $type"
-            }
+            lappend issues "checksum type is insecure on its own: $type"
         }
     }
 
@@ -454,7 +457,7 @@ proc portlint::lint_main {args} {
             }
     
             if {!$hashline
-                    && ![regexp {^\s*(?:PortSystem|PortGroup|version|license|[A-Za-z0-9_]+\.setup)\s} $line]
+                    && ![regexp {^\s*(?:PortSystem|PortGroup|version|python\.versions|(?:perl5|php|ruby)\.branch(?:es)?|license|[A-Za-z0-9_]+\.setup)\s} $line]
                     && [string first [option version] $line] != -1} {
                 ui_warn "Line $lineno seems to hardcode the version number, consider using \${version} instead"
                 incr warnings
@@ -555,13 +558,19 @@ proc portlint::lint_main {args} {
         }
     }
 
+    if {[info exists version] && [string match *+* $version]} {
+        ui_warn "Version '$version' contains '+' character, which makes it difficult to specify on the command line due to conflict with variant syntax."
+        incr warnings
+    }
+
     if {[info exists platforms]} {
         foreach platform $platforms {
-            if {$platform ni $lint_platforms} {
-                ui_error "Unknown platform: $platform"
+            set platname [lindex $platform 0]
+            if {$platname ni $lint_platforms} {
+                ui_error "Unknown platform: $platname"
                 incr errors
             } else {
-                ui_info "OK: Found platform: $platform"
+                ui_info "OK: Found platform: $platname"
             }
         }
     }

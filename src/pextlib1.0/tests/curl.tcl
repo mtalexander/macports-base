@@ -20,8 +20,8 @@ proc main {pextlibname} {
     test "dummy404" {[catch {curl fetch $dummyfile/404 $tempfile}]}
 
     # check the modification date of the dummy file.
-    test "mtime1" {[curl isnewer $dummyfile [clock scan 2019-10-20Z]]}
-    test "mtime2" {![curl isnewer $dummyfile [clock scan 2019-10-21Z]]}
+    test "mtime1" {[curl isnewer $dummyfile [clock scan 2019-10-20 -timezone :UTC -format {%Y-%m-%d}]]}
+    test "mtime2" {![curl isnewer $dummyfile [clock scan 2019-10-21 -timezone :UTC -format {%Y-%m-%d}]]}
 
     # use --disable-epsv
     #curl fetch --disable-epsv ftp://ftp.cup.hp.com/dist/networking/benchmarks/netperf/archive/netperf-2.2pl5.tar.gz $tempfile
@@ -32,10 +32,10 @@ proc main {pextlibname} {
     #curl fetch -u "I accept www.opensource.org/licenses/cpl:." http://www.research.att.com/~gsf/download/tgz/sfio.2005-02-01.tgz $tempfile
     #test {[md5 file $tempfile] == "48f45c7c77c23ab0ccca48c22b3870de"}
 
-    curl fetch --enable-compression https://www.whatsmyip.org/http-compression-test/ $tempfile
+    curl fetch --enable-compression --ignore-ssl-cert https://www.whatsmyip.org/http-compression-test/ $tempfile
     grepper $tempfile {gz_yes}
 
-    curl fetch https://www.whatsmyip.org/http-compression-test/ $tempfile
+    curl fetch --ignore-ssl-cert https://www.whatsmyip.org/http-compression-test/ $tempfile
     grepper $tempfile {gz_no}
 
     file delete -force $tempfile
