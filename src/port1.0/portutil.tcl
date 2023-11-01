@@ -1744,6 +1744,10 @@ proc eval_targets {target} {
             return 0
         } elseif {$target eq "activate"} {
             set regref [registry_open $subport $version $revision $portvariants ""]
+            # Set requested flag in the registry if in options
+            if {[info exists ::user_options(ports_requested)]} {
+                registry_prop_store $regref requested $::user_options(ports_requested)
+            }
             if {[registry_prop_retr $regref active] != 0} {
                 # Something to close the registry entry may be called here, if it existed.
                 ui_debug "Skipping $target ($subport @${version}_${revision}${portvariants}) since this port is already active"
@@ -1835,7 +1839,7 @@ proc open_statefile {args} {
             return -code error "$statefile is not writable - check permission on port directory"
         }
         if {[file mtime ${portpath}/Portfile] > [clock seconds]} {
-            return -code error "Portfile is from the future - check date and time of your system"
+            return -code error "Portfile for $subport is from the future - check date and time of your system"
         }
         if {![tbool ports_ignore_different]} {
             # start by assuming the statefile is current
@@ -1885,13 +1889,13 @@ proc open_statefile {args} {
             }
             if {[tbool portfile_changed]} {
                 if {![tbool ports_dryrun]} {
-                    ui_notice "Portfile changed since last build; discarding previous state."
+                    ui_notice "Portfile for $subport changed since last build; discarding previous state."
                     chownAsRoot $subbuildpath
                     delete $workpath
                     file mkdir $workpath
                     set fresh_build yes
                 } else {
-                    ui_notice "Portfile changed since last build but not discarding previous state (dry run)"
+                    ui_notice "Portfile for $subport changed since last build but not discarding previous state (dry run)"
                 }
             }
             close $readfd
@@ -3460,12 +3464,17 @@ proc _check_xcode_version {} {
             13 {
                 set min 14.1
                 set ok 14.1
-                set rec 14.2
+                set rec 14.3.1
+            }
+            14 {
+                set min 15.0
+                set ok 15.0
+                set rec 15.0
             }
             default {
-                set min 14.1
-                set ok 14.1
-                set rec 14.2
+                set min 15.0
+                set ok 15.0
+                set rec 15.0
             }
         }
         if {$xcodeversion eq "none"} {
@@ -3599,7 +3608,8 @@ proc _archive_available {} {
     ui_debug "Fetching $archivename archive size"
     # curl getsize can return -1 instead of throwing an error for
     # nonexistent files on FTP sites.
-    if {![catch {curl getsize $url} size] && $size > 0} {
+    if {![catch {curl getsize $url} size] && $size > 0
+          && ![catch {curl getsize ${url}.rmd160} sigsize] && $sigsize > 0} {
         set archive_available_result 1
         return 1
     }

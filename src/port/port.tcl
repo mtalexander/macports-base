@@ -225,6 +225,7 @@ proc entry_for_portlist {portentry} {
     #   requested_variants array  (variant=>+-)
     #   options array   (key=>value)
     #   fullname        (name/version_revision+-variants)
+    #       Note: name always normalised to lower case in fullname
 
     array set port $portentry
     if {![info exists port(url)]}       { set port(url) "" }
@@ -246,7 +247,7 @@ proc entry_for_portlist {portentry} {
     }
 
     # Form the fully discriminated portname: portname/version_revison+-variants
-    set port(fullname) "$port(name)/[composite_version $port(version) $port(variants)]"
+    set port(fullname) [string tolower $port(name)]/[composite_version $port(version) $port(variants)]
 
     return [array get port]
 }
@@ -416,11 +417,13 @@ proc portlist_sortint { list } {
 proc portlist_sortdependents { portlist } {
     foreach p $portlist {
         array set pvals $p
-        lappend entries($pvals(name)) $p
-        if {![info exists dependents($pvals(name))]} {
-            set dependents($pvals(name)) {}
+        # normalise port name to lower case
+        set norm_name [string tolower $pvals(name)]
+        lappend entries($norm_name) $p
+        if {![info exists dependents($norm_name)]} {
+            set dependents($norm_name) [list]
             foreach result [registry::list_dependents $pvals(name)] {
-                lappend dependents($pvals(name)) [lindex $result 2]
+                lappend dependents($norm_name) [string tolower [lindex $result 2]]
             }
         }
         array unset pvals
@@ -438,7 +441,7 @@ proc portlist_sortdependents_helper {p up_entries up_dependents up_seen up_retli
         set seen($p) 1
         upvar $up_entries entries $up_dependents dependents $up_retlist retlist
         array set pvals $p
-        foreach dependent $dependents($pvals(name)) {
+        foreach dependent $dependents([string tolower $pvals(name)]) {
             if {[info exists entries($dependent)]} {
                 foreach entry $entries($dependent) {
                     portlist_sortdependents_helper $entry entries dependents seen retlist
@@ -983,11 +986,20 @@ proc get_dep_ports {portname recursive} {
 
     # look up portname
     if {[catch {mportlookup $portname} result]} {
-        ui_debug "$::errorInfo"
-        return -code error "lookup of portname $portname failed: $result"
-    }
-    if {[llength $result] < 2} {
-        return -code error "Port $portname not found"
+        ui_debug $::errorInfo
+        if {[macports::ui_isset ports_processall]} {
+            ui_error "lookup of portname $portname failed"
+            return [list]
+        } else {
+            return -code error "lookup of portname $portname failed: $result"
+        }
+    } elseif {[llength $result] < 2} {
+        if {[macports::ui_isset ports_processall]} {
+            ui_error "Port $portname not found"
+            return [list]
+        } else {
+            return -code error "Port $portname not found"
+        }
     }
     array unset portinfo
     array set portinfo [lindex $result 1]
@@ -995,16 +1007,21 @@ proc get_dep_ports {portname recursive} {
 
     # open portfile
     if {[catch {set mport [mportopen $porturl [list subport $portinfo(name)] [array get global_variations]]} result]} {
-        ui_debug "$::errorInfo"
-        return -code error "Unable to open port: $result"
+        ui_debug $::errorInfo
+        if {[macports::ui_isset ports_processall]} {
+            ui_error "Unable to open port $portinfo(name): $result"
+            return [list]
+        } else {
+            return -code error "Unable to open port $portinfo(name): $result"
+        }
     }
     array unset portinfo
     array set portinfo [mportinfo $mport]
     mportclose $mport
 
     # gather its deps
-    set results {}
-    set deptypes {depends_fetch depends_extract depends_patch depends_build depends_lib depends_run depends_test}
+    set results [list]
+    set deptypes [list depends_fetch depends_extract depends_patch depends_build depends_lib depends_run depends_test]
 
     set deplist {}
     foreach type $deptypes {
@@ -1028,10 +1045,10 @@ proc get_dep_ports {portname recursive} {
 
                     # look up the dep
                     if {[catch {mportlookup $depname} result]} {
-                        ui_debug "$::errorInfo"
-                        return -code error "lookup of portname $depname failed: $result"
-                    }
-                    if {[llength $result] < 2} {
+                        ui_debug $::errorInfo
+                        ui_error "lookup of portname $depname failed: $result"
+                        continue
+                    } elseif {[llength $result] < 2} {
                         ui_error "Port $depname not found"
                         continue
                     }
@@ -1041,8 +1058,8 @@ proc get_dep_ports {portname recursive} {
 
                     # open its portfile
                     if {[catch {set mport [mportopen $porturl [list subport $portinfo(name)] [array get global_variations]]} result]} {
-                        ui_debug "$::errorInfo"
-                        ui_error "Unable to open port: $result"
+                        ui_debug $::errorInfo
+                        ui_error "Unable to open port $depname: $result"
                         continue
                     }
                     array unset portinfo
@@ -1084,11 +1101,20 @@ proc get_subports {portname} {
 
     # look up portname
     if {[catch {mportlookup $portname} result]} {
-        ui_debug "$::errorInfo"
-        return -code error "lookup of portname $portname failed: $result"
-    }
-    if {[llength $result] < 2} {
-        return -code error "Port $portname not found"
+        ui_debug $::errorInfo
+        if {[macports::ui_isset ports_processall]} {
+            ui_error "lookup of portname $portname failed"
+            return [list]
+        } else {
+            return -code error "lookup of portname $portname failed: $result"
+        }
+    } elseif {[llength $result] < 2} {
+        if {[macports::ui_isset ports_processall]} {
+            ui_error "Port $portname not found"
+            return [list]
+        } else {
+            return -code error "Port $portname not found"
+        }
     }
     array unset portinfo
     array set portinfo [lindex $result 1]
@@ -1096,8 +1122,13 @@ proc get_subports {portname} {
 
     # open portfile
     if {[catch {set mport [mportopen $porturl [list subport $portinfo(name)] [array get global_variations]]} result]} {
-        ui_debug "$::errorInfo"
-        return -code error "Unable to open port: $result"
+        ui_debug $::errorInfo
+        if {[macports::ui_isset ports_processall]} {
+            ui_error "Unable to open port $portinfo(name): $result"
+            return [list]
+        } else {
+            return -code error "Unable to open port $portinfo(name): $result"
+        }
     }
     array unset portinfo
     array set portinfo [mportinfo $mport]
@@ -1507,11 +1538,11 @@ proc opIntersection { a b } {
         # Quote the fullname and portname to avoid special characters messing up the regexp
         set safefullname [regex_pat_sanitize $port(fullname)]
 
-        set simpleform [expr { "$port(name)/" eq $port(fullname) }]
+        set simpleform [string equal -nocase "$port(name)/" $port(fullname)]
         if {$simpleform} {
             set pat "^${safefullname}"
         } else {
-            set safename [regex_pat_sanitize $port(name)]
+            set safename [regex_pat_sanitize [string tolower $port(name)]]
             set pat "^${safefullname}$|^${safename}/$"
         }
 
@@ -1551,11 +1582,11 @@ proc opComplement { a b } {
         # Quote the fullname and portname to avoid special characters messing up the regexp
         set safefullname [regex_pat_sanitize $port(fullname)]
 
-        set simpleform [expr { "$port(name)/" eq $port(fullname) }]
+        set simpleform [string equal -nocase "$port(name)/" $port(fullname)]
         if {$simpleform} {
             set pat "^${safefullname}"
         } else {
-            set safename [regex_pat_sanitize $port(name)]
+            set safename [regex_pat_sanitize [string tolower $port(name)]]
             set pat "^${safefullname}$|^${safename}/$"
         }
 
@@ -4234,12 +4265,12 @@ proc action_target { action portlist opts } {
         }
         if {[catch {set workername [mportopen $porturl [array get options] [array get requested_variations]]} result]} {
             ui_debug $::errorInfo
-            break_softcontinue "Unable to open port: $result" 1 status
+            break_softcontinue "Unable to open port $portname: $result" 1 status
         }
         if {[catch {mportexec $workername $target} result]} {
             ui_debug $::errorInfo
             mportclose $workername
-            break_softcontinue "Unable to execute port: $result" 1 status
+            break_softcontinue "Unable to execute port $portname: $result" 1 status
         }
 
         mportclose $workername
