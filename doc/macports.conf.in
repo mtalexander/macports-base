@@ -35,6 +35,14 @@ frameworks_dir      	@MPFRAMEWORKSDIR@
 # Location of the MacPorts sources list.
 sources_conf        	@MPCONFIGDIR_EXPANDED@/sources.conf
 
+# Location of archive_sites.conf, used to configure sources of
+# (binary) archives.
+archive_sites_conf      @MPCONFIGDIR_EXPANDED@/archive_sites.conf
+
+# Location of pubkeys.conf, used to configure public keys to use to
+# verify downloaded files.
+pubkeys_conf            @MPCONFIGDIR_EXPANDED@/pubkeys.conf
+
 # Location of the MacPorts global variants definition file. Optional.
 variants_conf       	@MPCONFIGDIR_EXPANDED@/variants.conf
 
@@ -46,9 +54,24 @@ variants_conf       	@MPCONFIGDIR_EXPANDED@/variants.conf
 #   unavailable.
 #buildfromsource     	ifneeded
 
-# Type of archive to use for port images. Supported types are cpgz,
-# cpio, tar, tbz, tbz2, tgz, tlz, txz, xar, zip.
+# Type of archive to use for port images created by local builds.
+# Supported types are cpgz, cpio, tar, tbz, tbz2, tgz, tlz, txz, xar, zip.
 #portarchivetype     	tbz2
+
+# How to store port images.
+# - archive: Image is kept in the archive as downloaded (format
+#   determined by the archive site configuration) or built locally
+#   (format determined by portarchivetype). Must be extracted to
+#   activate the port. This is the default if the filesystem does not
+#   support cloning.
+# - directory: Image is stored as a directory. Downloaded archives are
+#   extracted to create the directory and then deleted. This is the
+#   default if the filesystem supports cloning.
+# - directory_and_archive: Both archives and extracted directories are
+#   kept. This is useful if you want to distribute the ports that you
+#   build as archives, and also get the performance benefits of the
+#   directory mode on a filesystem that supports cloning.
+#portimage_mode         directory_and_archive
 
 # Apply transparent filesystem compression to files on activation.
 # Requires bsdtar with support for --hfsCompression in binpath, which can be
@@ -112,6 +135,25 @@ variants_conf       	@MPCONFIGDIR_EXPANDED@/variants.conf
 
 # Keep logs after successful installations.
 #keeplogs            	no
+
+# URLs that MacPorts attempts to download to find out whether a new version was
+# released. Multiple values, space-separated; only one of the URLs needs to be
+# available. Downloads will be attempted in the specified order.
+#release_version_urls https://raw.githubusercontent.com/macports/macports-base/master/config/RELEASE_URL \
+#                     https://trac.macports.org/export/HEAD/macports-base/config/RELEASE_URL \
+#                     https://distfiles.macports.org/MacPorts/RELEASE_URL
+
+# URL where MacPorts will download a new source code archive, if the
+# release_version_urls indicate that the current version needs to be updated.
+# In this URL, {version} will be replaced with the version number determined
+# from release_version_urls.
+#
+# Additionally, ".sig" will be appended to this URL, downloaded, and used to
+# verify a signature made with one of the keys in
+# $prefix/share/macports/keys/base/ using the signify(1) utility.
+#
+# The list of distfile mirrors will automatically be appended to this option.
+#release_urls https://github.com/macports/macports-base/releases/download/v{version}/MacPorts-{version}.tar.bz2
 
 # The rsync server for fetching MacPorts base during selfupdate. This
 # setting is NOT used when downloading ports trees; ports trees are

@@ -46,9 +46,9 @@ namespace eval portbump {
 # Target prerun procedure; simply prints a message about what we're doing.
 #
 proc portbump::bump_start {args} {
-    global UI_PREFIX
+    global UI_PREFIX subport
 
-    ui_notice "$UI_PREFIX [format [msgcat::mc "Bumping checksums for %s"] [option subport]]"
+    ui_notice "$UI_PREFIX [format [msgcat::mc "Bumping checksums for %s"] ${subport}]"
 }
 
 # bump_main
@@ -77,7 +77,7 @@ proc portbump::bump_main {args} {
     # If everything is fine with the syntax, keep on and check the checksum of
     # the distfiles.
     if {[portchecksum::parse_checksums $checksums_str] eq "yes"} {
-        set distpath [option distpath]
+        global distpath
 
         foreach distfile $all_dist_files {
             ui_info "$UI_PREFIX [format [msgcat::mc "Checksumming %s"] $distfile]"
@@ -95,8 +95,8 @@ proc portbump::bump_main {args} {
             } else {
                 # Retrieve the list of types/values from the array.
                 set portfile_checksums $checksums_array($distfile)
-                set calculated_checksums {}
-                set both_checksums {}
+                set calculated_checksums [list]
+                set both_checksums [list]
 
                 # Iterate on this list to check the actual values.
                 foreach {type sum} $portfile_checksums {
@@ -157,9 +157,8 @@ proc portbump::bump_main {args} {
     } else {
         # Show the desired checksum line for easy cut-paste
         # based on the previously calculated values, plus our default types
-        set sums {}
 
-        global version revision
+        global version revision subport
 
         ui_msg "We will bump these:"
         foreach {type sum calculated_sum} $both_checksums {
@@ -167,7 +166,7 @@ proc portbump::bump_main {args} {
             ui_msg [format "New %-8s %s" ${type}: $calculated_sum]
         }
 
-        set patterns {}
+        set patterns [list]
 
         set whitespace {[[:space:]\\]+}
         # Create substitution pattern(s) for checksum
@@ -178,7 +177,7 @@ proc portbump::bump_main {args} {
         lappend patterns {s/(revision[[:space:]\\]+)[0-9]+/\10/g}
 
         # Construct sed command
-        set cmdline {}
+        set cmdline [list]
         lappend cmdline $portutil::autoconf::sed_command -E
         foreach pattern $patterns {
             lappend cmdline -e $pattern
@@ -190,17 +189,11 @@ proc portbump::bump_main {args} {
         # root -> owner id
         exec_as_uid $owneruid {
             # Create temporary Portfile.bump.XXXXXX
-            if {[catch {set tmpfile [mkstemp "${portpath}/Portfile.bump.XXXXXX"]} error]} {
+            if {[catch {set tmpfd [file tempfile tmpfile "${portpath}/Portfile.bump.XXXXXX"]} error]} {
                 ui_debug $::errorInfo
-                ui_error "mkstemp: $error"
-                return -code error "mkstemp failed"
+                ui_error "file tempfile: $error"
+                return -code error "file tempfile failed"
             }
-
-            # Extract the Tcl Channel number
-            set tmpfd [lindex $tmpfile 0]
-
-            # Set tmpfile to only the file name
-            set tmpfile [join [lrange $tmpfile 1 end]]
 
             # Get Portfile attributes
             set attributes [file attributes $portfile]
@@ -225,7 +218,7 @@ proc portbump::bump_main {args} {
                 set patchfd [open $patchfile w]
 
                 # Construct diff command
-                set diffcmd {}
+                set diffcmd [list]
                 lappend diffcmd $portutil::autoconf::diff_path -u --label old/Portfile --label new/Portfile
                 lappend diffcmd $portfile $tmpfile >@$patchfd
 
@@ -253,7 +246,7 @@ proc portbump::bump_main {args} {
                 file attributes $portfile {*}$attributes
 
                 ui_msg "Checksums successfully bumped. Suggested commit message:"
-                ui_msg [format "%-8s%s: update to %s" "" [option subport] $version]
+                ui_msg [format "%-8s%s: update to %s" "" ${subport} $version]
             }
 
             # Delete Portfile.bump

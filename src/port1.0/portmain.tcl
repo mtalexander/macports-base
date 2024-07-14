@@ -60,7 +60,7 @@ options prefix name version revision epoch categories maintainers \
         compiler.limit_flags \
         compiler.support_environment_paths \
         compiler.support_environment_sdkroot \
-        add_users use_xcode
+        add_users use_xcode source_date_epoch
 
 proc portmain::check_option_integer {option action args} {
     if {$action eq "set" && ![string is wideinteger -strict $args]} {
@@ -86,18 +86,20 @@ options_export name version revision epoch categories maintainers \
 
 default subport {[portmain::get_default_subport]}
 proc portmain::get_default_subport {} {
-    global name portpath
+    global name
     if {[info exists name]} {
         return $name
     }
+    global portpath
     return [file tail $portpath]
 }
 default subbuildpath {[portmain::get_subbuildpath]}
 proc portmain::get_subbuildpath {} {
-    global portpath portbuildpath subport
+    global portbuildpath subport
     if {$subport ne ""} {
         set subdir $subport
     } else {
+        global portpath
         set subdir [file tail $portpath]
     }
     return [file normalize [file join $portbuildpath $subdir]]
@@ -138,21 +140,19 @@ default os.minor {$os_minor}
 default os.arch {$os_arch}
 default os.endian {$os_endian}
 
-set macos_version_text {}
-if {[option os.platform] eq "darwin"} {
-    set macos_version_text "(macOS ${macos_version}) "
+proc portmain::report_platform_info {} {
+    global os.platform os.version os.arch macos_version
+    set macos_version_text {}
+    if {${os.platform} eq "darwin"} {
+        set macos_version_text "(macOS ${macos_version}) "
+    }
+    ui_debug "OS ${os.platform}/${os.version} ${macos_version_text}arch ${os.arch}"
 }
-ui_debug "OS [option os.platform]/[option os.version] ${macos_version_text}arch [option os.arch]"
 
 default universal_variant {${use_configure}}
 
-if {[option os.platform] eq "darwin" && [option os.subplatform] eq "macosx"} {
-    # we're on macOS and can therefore build universal
-    default os.universal_supported yes
-} else {
-    default os.universal_supported no
-}
-
+# if we're on macOS and can therefore build universal
+default os.universal_supported {[expr {${os.subplatform} eq "macosx"}]}
 default universal_possible {[expr {${os.universal_supported} && [llength ${configure.universal_archs}] >= 2}]}
 
 default compiler.cpath {${prefix}/include}
@@ -169,7 +169,114 @@ set egid [getegid]
 default worksymlink {[file normalize [file join $portpath work]]}
 default distpath {[file normalize [file join $portdbpath distfiles ${dist_subdir}]]}
 
-default use_xcode {[expr {[option build.type] eq "xcode" || !([file exists /usr/lib/libxcselect.dylib] || [option os.major] >= 20) || ![file executable /Library/Developer/CommandLineTools/usr/bin/make]}]}
+default use_xcode {[expr {${build.type} eq "xcode" || !([file exists /usr/lib/libxcselect.dylib] || ${os.major} >= 20) || ![file executable /Library/Developer/CommandLineTools/usr/bin/make]}]}
+
+default source_date_epoch {[portmain::get_source_date_epoch]}
+
+# Figure out when this port was last modified, intended to be used as a
+# timestamp for reproducible builds.
+proc portmain::get_source_date_epoch {} {
+    variable source_date_epoch_cached
+    if {[info exists source_date_epoch_cached]} {
+        return $source_date_epoch_cached
+    }
+    global portpath PortInfo
+    set newest 0
+    if {[catch {findBinary git} git]} {
+        set git {}
+        set paths_in_git_repo 0
+    } elseif {[getuid] == 0} {
+        if {[catch {
+            set prev_euid [geteuid]
+            set prev_egid [getegid]
+            if {[geteuid] != 0} {
+                seteuid 0
+            }
+            # Must change egid before dropping root euid.
+            setegid [name_to_gid [file attributes $portpath -group]]
+            seteuid [name_to_uid [file attributes $portpath -owner]]
+        } result]} {
+            ui_debug "get_source_date_epoch: dropping privileges failed: $result"
+        }
+    }
+    set checkpaths [list $portpath]
+    if {[info exists PortInfo(portgroups)]} {
+        lappend checkpaths {*}[lmap g $PortInfo(portgroups) {lindex $g 2}]
+    }
+    if {$git ne {}} {
+        set checkdirs [list $portpath {*}[lmap p [lrange $checkpaths 1 end] {file dirname $p}]]
+        set paths_in_git_repo 1
+        foreach d $checkdirs {
+            if {[catch {exec -ignorestderr $git -C $d rev-parse --is-inside-work-tree 2> /dev/null}]} {
+                set paths_in_git_repo 0
+                break
+            }
+        }
+    }
+    if {$paths_in_git_repo} {
+        # Use time of last commit only if there are no uncommitted changes
+        set any_uncommitted 0
+        foreach p $checkpaths d $checkdirs {
+            if {[catch {exec -ignorestderr $git -C $d status --porcelain $p 2> /dev/null} result]} {
+                set any_uncommitted 1
+                ui_debug "get_source_date_epoch: git status failed: $result"
+                break
+            } elseif {$result ne ""} {
+                set any_uncommitted 1
+                ui_debug "get_source_date_epoch: uncommitted changes to $p"
+                break
+            }
+        }
+        if {!$any_uncommitted} {
+            set log_failed 0
+            foreach p $checkpaths d $checkdirs {
+                if {![catch {exec -ignorestderr $git -C $d log -1 --pretty=%ct $p 2> /dev/null} result]} {
+                    if {$result > $newest} {
+                        set newest $result
+                    }
+                } else {
+                    set log_failed 1
+                    ui_debug "get_source_date_epoch: git log failed: $result"
+                    break
+                }
+            }
+            if {!$log_failed} {
+                set source_date_epoch_cached $newest
+                if {[info exists prev_euid]} {
+                    seteuid 0
+                    if {[info exists prev_egid]} {
+                        setegid $prev_egid
+                    }
+                    seteuid $prev_euid
+                }
+                return $newest
+            }
+        }
+    }
+    if {[info exists prev_euid]} {
+        seteuid 0
+        if {[info exists prev_egid]} {
+            setegid $prev_egid
+        }
+        seteuid $prev_euid
+    }
+    # TODO: Ensure commit timestamps as extracted above are set in
+    # ports tree distributed as tarball.
+    fs-traverse fullpath $checkpaths {
+        if {[catch {
+            if {[file type $fullpath] eq "file"} {
+                set mtime [file mtime $fullpath]
+                if {$mtime > $newest} {
+                    set newest $mtime
+                }
+            }
+        } result]} {
+            ui_debug "get_source_date_epoch: $result"
+        }
+    }
+    set source_date_epoch_cached $newest
+    return $newest
+}
 
 proc portmain::main {args} {
     return 0

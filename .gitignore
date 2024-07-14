@@ -13,6 +13,8 @@ doc/.dep
 doc/macports.conf
 doc/pubkeys.conf
 
+keys/*/*.sec
+
 Mk/macports.autoconf.mk
 
 portmgr/dmg/postflight
@@ -62,5 +64,6 @@ vendor/tcl8.*/unix/**/*Uuid.h
 Makefile
 pkgIndex.tcl
 !vendor/tcllib*/**/pkgIndex.tcl
+!vendor/signify-osx/Makefile
 
 /dist/

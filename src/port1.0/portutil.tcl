@@ -38,14 +38,16 @@ package require macports_util 1.0
 package require msgcat
 package require porttrace 1.0
 
-set targets [list]
-set target_uniqid 0
-
-set all_variants [list]
+namespace eval portutil {
+    variable targets [list]
+    variable all_variants [list]
+}
 
 ########### External High Level Procedures ###########
 
 namespace eval options {
+    variable option_defaults [dict create]
+    variable defaults_const [dict create]
 }
 
 # option
@@ -86,9 +88,9 @@ proc exists {option} {
 # @param option name of the option
 # @param args arguments
 proc handle_option {option args} {
-    global $option user_options
-
+    global user_options
     if {![info exists user_options($option)]} {
+        global $option
         set $option $args
     }
 }
@@ -99,14 +101,10 @@ proc handle_option {option args} {
 # @param option name of the option
 # @param args arguments
 proc handle_option-append {option args} {
-    global $option user_options
-
+    global user_options
     if {![info exists user_options($option)]} {
-        if {[info exists $option]} {
-            set $option [concat [set $option] $args]
-        } else {
-            set $option $args
-        }
+        global $option
+        lappend $option {*}$args
     }
 }
 
@@ -116,9 +114,9 @@ proc handle_option-append {option args} {
 # @param option name of the option
 # @param args arguments
 proc handle_option-prepend {option args} {
-    global $option user_options
-
+    global user_options
     if {![info exists user_options($option)]} {
+        global $option
         if {[info exists $option]} {
             set $option [concat $args [set $option]]
         } else {
@@ -133,14 +131,11 @@ proc handle_option-prepend {option args} {
 # @param option name of the option
 # @param args arguments
 proc handle_option-delete {option args} {
-    global $option user_options
-
+    global user_options $option
     if {![info exists user_options($option)] && [info exists $option]} {
-        set temp [set $option]
         foreach val $args {
-            set temp [ldelete $temp $val]
+            set $option [ldelete [set $option][set $option {}] $val]
         }
-        set $option $temp
     }
 }
 
@@ -150,14 +145,11 @@ proc handle_option-delete {option args} {
 # @param option name of the option
 # @param args arguments
 proc handle_option-strsed {option args} {
-    global $option user_options
-
+    global user_options $option
     if {![info exists user_options($option)] && [info exists $option]} {
-        set temp [set $option]
         foreach val $args {
-            set temp [strsed $temp $val]
+            set $option [strsed [set $option][set $option {}] $val]
         }
-        set $option $temp
     }
 }
 
@@ -167,26 +159,13 @@ proc handle_option-strsed {option args} {
 # @param option name of the option
 # @param args arguments
 proc handle_option-replace {option args} {
-    global $option user_options deprecated_options
-
-    # Deprecate -replace with only one argument, for backwards compatibility call -strsed
-    # XXX: Remove this in 2.2.0
-    if {[llength $args] == 1} {
-        if {![info exists deprecated_options(${option}-replace)]} {
-            set deprecated_options(${option}-replace) [list ${option}-strsed 0]
-        }
-        set refcount [lindex $deprecated_options(${option}-replace) 1]
-        lset deprecated_options(${option}-replace) 1 [expr {$refcount + 1}]
-        return [handle_option-strsed $option {*}$args]
-    }
-
+    global user_options $option
     if {![info exists user_options($option)] && [info exists $option]} {
         foreach {old new} $args {
             set index [lsearch -exact [set $option] $old]
-            if {$index == -1} {
-                continue
+            if {$index != -1} {
+                lset $option $index $new
             }
-            set $option [lreplace [set $option] $index $index $new]
         }
     }
 }
@@ -216,7 +195,7 @@ proc options {args} {
 # @param action set or delete
 # @param value the value to be set, defaults to an empty string
 proc options::export {option action {value ""}} {
-    global $option PortInfo
+    global PortInfo
     switch $action {
         set {
             set PortInfo($option) $value
@@ -244,12 +223,12 @@ proc options_export {args} {
 # @param action read/set
 # @param value ignored
 proc handle_deprecated_option {option action {value ""}} {
-    global subport $option deprecated_options
+    global deprecated_options
     set newoption [lindex $deprecated_options($option) 0]
     set refcount  [lindex $deprecated_options($option) 1]
-    global $newoption
 
     if {$newoption eq ""} {
+        global subport
         ui_warn "Port $subport using deprecated option \"$option\"."
         return
     }
@@ -258,8 +237,10 @@ proc handle_deprecated_option {option action {value ""}} {
     lset deprecated_options($option) 1 [expr {$refcount + 1}]
 
     if {$action ne "read"} {
+        global $option
         $newoption [set $option]
     } else {
+        global $newoption
         $option [set $newoption]
     }
 }
@@ -293,23 +274,25 @@ proc option_deprecate {option {newoption ""} } {
 # @param option the name of the option
 # @param args name of procs
 proc option_proc {option args} {
-    global option_procs $option
+    global option_procs
     if {[info exists option_procs($option)]} {
-        set option_procs($option) [concat $option_procs($option) $args]
+        lappend option_procs($option) {*}$args
         # we're already tracing
     } else {
+        global $option
         set option_procs($option) $args
-        trace add variable $option {read write unset} option_proc_trace
+        trace add variable $option [list read write unset] option_proc_trace
     }
 }
 
 # option_proc_trace
 # trace handler for option reads. Calls option procedures with correct arguments.
 proc option_proc_trace {optionName index op} {
+    set optionName [namespace tail $optionName]
     global option_procs
-    upvar $optionName $optionName
     switch $op {
         write {
+            global $optionName
             foreach p $option_procs($optionName) {
                 $p $optionName set [set $optionName]
             }
@@ -320,12 +303,13 @@ proc option_proc_trace {optionName index op} {
             }
         }
         unset {
+            global $optionName
             foreach p $option_procs($optionName) {
                 if {[catch {$p $optionName delete} result]} {
                     ui_debug "error during unset trace ($p): $result\n$::errorInfo"
                 }
             }
-            trace add variable $optionName {read write unset} option_proc_trace
+            trace add variable $optionName [list read write unset] option_proc_trace
         }
     }
 }
@@ -356,7 +340,7 @@ proc command_string {command} {
         append cmdstring " ${command}"
     }
 
-    foreach var "${command}.pre_args ${command}.args ${command}.post_args" {
+    foreach var [list ${command}.pre_args ${command}.args ${command}.post_args] {
         if {[info exists $var]} {
             foreach string [set ${var}] {
                 append cmdstring " ${string}"
@@ -456,6 +440,9 @@ proc command_exec {args} {
     if {[option configure.sdkroot] ne ""} {
         set ${varprefix}.env_array(SDKROOT) [option configure.sdkroot]
     }
+    if {[option source_date_epoch] ne ""} {
+        set ${varprefix}.env_array(SOURCE_DATE_EPOCH) [option source_date_epoch]
+    }
 
     # Debug that.
     ui_debug "Environment: [environment_array_to_string ${varprefix}.env_array]"
@@ -472,7 +459,7 @@ proc command_exec {args} {
     # Call this command.
     # TODO: move that to the system native call?
     # Save the environment.
-    array set saved_env [array get env]
+    set saved_env [array get env]
     # Set the overridden variables from the portfile.
     array set env [array get ${varprefix}.env_array]
     # Call the command.
@@ -488,7 +475,7 @@ proc command_exec {args} {
 
     # Restore the environment.
     array unset env *
-    array set env [array get saved_env]
+    array set env $saved_env
 
     # Return as if system had been called directly.
     return -code $code -errorcode $errcode -errorinfo $errinfo $result
@@ -499,41 +486,47 @@ proc command_exec {args} {
 # and adds a variable trace. The variable traces allows for delayed
 # variable and command expansion in the variable's default value.
 proc default {option val} {
-    global $option option_defaults
-    if {[info exists option_defaults($option)]} {
+    global options::option_defaults options::defaults_const $option
+    if {[dict exists $option_defaults $option]} {
         ui_debug "Re-registering default for $option"
         # remove the old trace
-        trace remove variable $option {read write unset} default_check
-    } else {
+        set is_const [expr {[dict exists $defaults_const $option] && [dict get $defaults_const $option]}]
+        set oplist [expr {$is_const ? [list write unset] : [list read write unset]}]
+        trace remove variable $option $oplist default_check
+    } elseif {[info exists $option]} {
         # If option is already set and we did not set it
         # do not reset the value
-        if {[info exists $option]} {
-            return
-        }
+        return
     }
-    set option_defaults($option) $val
+    dict set option_defaults $option $val
     set $option $val
-    trace add variable $option {read write unset} default_check
+    # Not completely accurate, but should match all simple constants,
+    # and unnecessarily setting the trace on complicated ones with
+    # backslashes, braces etc still gives correct results.
+    set is_const [expr {[string first {$} $val] == -1 && [string first {[} $val] == -1}]
+    dict set defaults_const $option $is_const
+    set oplist [expr {$is_const ? [list write unset] : [list read write unset]}]
+    trace add variable $option $oplist default_check
 }
 
 # default_check
 # trace handler to provide delayed variable & command expansion
 # for default variable values
-proc default_check {optionName index op} {
-    global option_defaults $optionName
+proc default_check {varName index op} {
+    set optionName [namespace tail $varName]
+    global options::option_defaults $optionName
     switch $op {
-        write {
-            unset option_defaults($optionName)
-            trace remove variable $optionName {read write unset} default_check
-            return
-        }
         read {
-            uplevel #0 [list set $optionName] [subst -nocommands {[subst {$option_defaults($optionName)}]}]
+            uplevel #0 [list set $optionName [uplevel #0 [list subst [dict get $option_defaults $optionName]]]]
             return
         }
-        unset {
-            unset option_defaults($optionName)
-            trace remove variable $optionName {read write unset} default_check
+        unset -
+        write {
+            global options::defaults_const
+            set is_const [expr {[dict exists $defaults_const $optionName] && [dict get $defaults_const $optionName]}]
+            set oplist [expr {$is_const ? [list write unset] : [list read write unset]}]
+            dict unset option_defaults $optionName
+            trace remove variable $optionName $oplist default_check
             return
         }
     }
@@ -542,10 +535,9 @@ proc default_check {optionName index op} {
 ##
 # Filter options which take strings removing indent to ease Portfile writing
 proc handle_option_string {option action args} {
-    global $option
-
     switch $action {
         set {
+            global $option
             set args [join $args]
 
             set fulllist [list]
@@ -582,19 +574,12 @@ proc handle_option_string {option action args} {
 # variant <provides> [<provides> ...] [requires <requires> [<requires>]]
 # Portfile level procedure to provide support for declaring variants
 proc variant {args} {
-    global all_variants PortInfo porturl
-
     # Each key in PortInfo(vinfo) maps to an array which contains the
     # following keys:
     #   * conflicts
     #   * description
     #   * is_default: This key exists iff the variant is a default variant.
     #   * requires
-    if {![info exists PortInfo(vinfo)]} {
-        set PortInfo(vinfo) {}
-    }
-    array set vinfo $PortInfo(vinfo)
-
     set len [llength $args]
     if {$len < 2} {
         return -code error "Malformed variant specification"
@@ -638,16 +623,15 @@ proc variant {args} {
         # This variant was already defined. Remove it from the dlist.
         variant_remove_ditem $variant_provides
     } else {
-        # Create an array to contain the variant's information.
-        if {![info exists vinfo($variant_provides)]} {
-            set vinfo($variant_provides) {}
+        global PortInfo
+        if {![info exists PortInfo(vinfo)]} {
+            set PortInfo(vinfo) [dict create]
         }
-        array set variant $vinfo($variant_provides)
 
         # Set conflicts.
         set vconflicts [join [lsort [ditem_key $ditem conflicts]]]
         if {$vconflicts ne ""} {
-            array set variant [list conflicts $vconflicts]
+            dict set PortInfo(vinfo) $variant_provides conflicts $vconflicts
         }
 
         lappend PortInfo(variants) $variant_provides
@@ -655,24 +639,25 @@ proc variant {args} {
 
         # read global variant description, if none given
         if {$vdesc eq ""} {
-            set vdesc [variant_desc $porturl $variant_provides]
+            global portresourcepath
+            if {![info exists portresourcepath]} {
+                global porturl
+                set portresourcepath [getportresourcepath $porturl]
+            }
+            set vdesc [get_variant_description $variant_provides $portresourcepath]
         }
 
         # Set description.
         if {$vdesc ne ""} {
-            array set variant [list description $vdesc]
+            dict set PortInfo(vinfo) $variant_provides description $vdesc
         }
 
         # Set requires.
         set vrequires [join [lsort [ditem_key $ditem requires]]]
         if {$vrequires ne ""} {
-            array set variant [list requires $vrequires]
+            dict set PortInfo(vinfo) $variant_provides requires $vrequires
         }
     }
-
-    # Add the variant (back) to PortInfo(vinfo).
-    array set vinfo [list $variant_provides [array get variant]]
-    set PortInfo(vinfo) [array get vinfo]
 
     if {[variant_isset $variant_provides]} {
         # set variants that this one requires
@@ -682,6 +667,7 @@ proc variant {args} {
     }
 
     # Finally append the ditem to the dlist.
+    global portutil::all_variants
     lappend all_variants $ditem
 }
 
@@ -689,7 +675,6 @@ proc variant {args} {
 # Returns 1 if variant name selected, otherwise 0
 proc variant_isset {name} {
     global variations
-
     if {[info exists variations($name)] && $variations($name) eq "+"} {
         return 1
     }
@@ -706,12 +691,12 @@ proc variant_set {name} {
 # variant_remove_ditem name
 # Remove variant name's ditem from the all_variants dlist
 proc variant_remove_ditem {name} {
-    global all_variants
+    global portutil::all_variants
     set item_index 0
     foreach variant_item $all_variants {
         set item_provides [ditem_key $variant_item provides]
         if {$item_provides eq $name} {
-            set all_variants [lreplace $all_variants $item_index $item_index]
+            set all_variants [lreplace ${all_variants}[set all_variants {}] $item_index $item_index]
             break
         }
 
@@ -722,14 +707,13 @@ proc variant_remove_ditem {name} {
 # variant_delete name
 # completely delete the named variant from the port
 proc variant_delete {name} {
+    global PortInfo
     variant_remove_ditem $name
-    if {[info exists ::PortInfo(variants)]} {
-        set ::PortInfo(variants) [ldelete $::PortInfo(variants) $name]
+    if {[info exists PortInfo(variants)]} {
+        set PortInfo(variants) [ldelete $PortInfo(variants) $name]
     }
-    if {[info exists ::PortInfo(vinfo)]} {
-        array set vinfo $::PortInfo(vinfo)
-        unset -nocomplain vinfo($name)
-        set ::PortInfo(vinfo) [array get vinfo]
+    if {[info exists PortInfo(vinfo)]} {
+        dict unset PortInfo(vinfo) $name
     }
 }
 
@@ -742,65 +726,6 @@ proc variant_exists {name} {
     }
 
     return 0
-}
-
-##
-# Load the global description file for a port tree
-#
-# @param descfile path to the descriptions file
-proc load_variant_desc_file {descfile} {
-    global variant_descs_global
-
-    if {![info exists variant_descs_global($descfile)]} {
-        set variant_descs_global($descfile) yes
-
-        if {[file exists $descfile]} {
-            ui_debug "Reading variant descriptions from $descfile"
-
-            if {[catch {set fd [open $descfile r]} err]} {
-                ui_warn "Could not open global variant description file: $err"
-                return ""
-            }
-            set lineno 0
-            while {[gets $fd line] >= 0} {
-                incr lineno
-                set name [lindex $line 0]
-                set desc [lindex $line 1]
-                if {$name ne "" && $desc ne ""} {
-                    set variant_descs_global(${descfile}_$name) $desc
-                } else {
-                    ui_warn "Invalid variant description in $descfile at line $lineno"
-                }
-            }
-            close $fd
-        }
-    }
-}
-
-##
-# Get description for a variant from global descriptions file
-#
-# @param porturl url to a port
-# @param variant name
-# @return description from descriptions file or an empty string
-proc variant_desc {porturl variant} {
-    global variant_descs_global
-
-    set descfile [getportresourcepath $porturl "port1.0/variant_descriptions.conf" no]
-    load_variant_desc_file $descfile
-
-    if {[info exists variant_descs_global(${descfile}_${variant})]} {
-        return $variant_descs_global(${descfile}_${variant})
-    } else {
-        set descfile [getdefaultportresourcepath "port1.0/variant_descriptions.conf"]
-        load_variant_desc_file $descfile
-
-        if {[info exists variant_descs_global(${descfile}_${variant})]} {
-            return $variant_descs_global(${descfile}_${variant})
-        }
-
-        return ""
-    }
 }
 
 # platform [<os> [<release>]] [<arch>]
@@ -895,19 +820,25 @@ proc _handle_platforms {option action args} {
     }
 }
 
-# Platform specifier for binary archive name
-# "any" in platforms means the built archive will work on any OS
+# Platform and major version this port will be compatible with in built form
+# "any" in platforms means the built port will work on any OS
 # "darwin any" means it will work on any darwin version
-proc _get_archive_platform {} {
-    global platforms os.platform os.subplatform os.major
-    foreach p $platforms {
+# Returns a list: {platform major}
+proc _get_compatible_platform {} {
+    global os.platform
+    foreach p [option platforms] {
         if {$p eq "any"} {
-            return any_any
-        } elseif {[lindex $p 0] in [list ${os.platform} ${os.subplatform}] && [lindex $p 1] eq "any"} {
-            return ${os.platform}_any
+            return [list any any]
+        } elseif {[lindex $p 0] in [list ${os.platform} [option os.subplatform]] && [lindex $p 1] eq "any"} {
+            return [list ${os.platform} any]
         }
     }
-    return ${os.platform}_${os.major}
+    return [list ${os.platform} [option os.major]]
+}
+
+# Platform specifier string for binary archive name
+proc _get_archive_platform {} {
+    return [join [_get_compatible_platform] _]
 }
 
 # Portfiles may define more than one port.
@@ -996,10 +927,10 @@ proc getdistname {name} {
 # tbool (testbool)
 # If the variable exists in the calling procedure's namespace
 # and is set to a boolean true value, return 1. Otherwise, return 0
-proc tbool {key} {
-    upvar $key $key
-    if {[info exists $key]} {
-        return [string is true -strict [set $key]]
+proc tbool {_tbool_varname} {
+    upvar $_tbool_varname $_tbool_varname
+    if {[info exists $_tbool_varname]} {
+        return [string is true -strict [set $_tbool_varname]]
     }
     return 0
 }
@@ -1009,7 +940,7 @@ proc tbool {key} {
 proc ldelete {list value} {
     set ix [lsearch -exact $list $value]
     if {$ix >= 0} {
-        return [lreplace $list $ix $ix]
+        return [lreplace ${list}[set ilist {}] $ix $ix]
     }
     return $list
 }
@@ -1017,7 +948,7 @@ proc ldelete {list value} {
 # reinplace
 # Provides "sed in place" functionality
 proc reinplace {args}  {
-    global env workpath worksrcpath
+    global UI_PREFIX env workpath worksrcpath
     set extended 0
     set suppress 0
     set quiet 0
@@ -1075,24 +1006,17 @@ proc reinplace {args}  {
     }
 
     foreach file $files {
-        global UI_PREFIX
-
         # if $file is an absolute path already, file join will just return the
         # absolute path, otherwise it is $dir/$file
         set file [file join $dir $file]
 
-        if {[catch {set tmpfile [mkstemp "${tempdir}/[file tail $file].sed.XXXXXXXX"]} error]} {
+        if {[catch {set tmpfd [file tempfile tmpfile "${tempdir}/[file tail $file].sed.XXXXXXXX"]} error]} {
             ui_debug $::errorInfo
             ui_error "reinplace: $error"
             return -code error "reinplace failed"
-        } else {
-            # Extract the Tcl Channel number
-            set tmpfd [lindex $tmpfile 0]
-            # Set tmpfile to only the file name
-            set tmpfile [join [lrange $tmpfile 1 end]]
         }
 
-        set cmdline {}
+        set cmdline [list]
         lappend cmdline $portutil::autoconf::sed_command
         if {$extended} {
             lappend cmdline -E
@@ -1280,7 +1204,7 @@ proc move {args} {
     set options [list]
     while {[string match "-*" [lindex $args 0]]} {
         set arg [string range [lindex $args 0] 1 end]
-        set args [lreplace $args 0 0]
+        set args [lreplace ${args}[set args {}] 0 0]
         switch -- $arg {
             force {lappend options -$arg}
             - break
@@ -1314,9 +1238,9 @@ proc ln {args} {
         if {[string length $arg] > 1} {
             set remainder -[string range $arg 1 end]
             set arg [string range $arg 0 0]
-            set args [lreplace $args 0 0 $remainder]
+            lset args 0 $remainder
         } else {
-            set args [lreplace $args 0 0]
+            set args [lreplace ${args}[set args {}] 0 0]
         }
         switch -- $arg {
             f -
@@ -1531,31 +1455,31 @@ proc target_run {ditem} {
                     set tracing yes
 
                     # collect deps
-                    set depends {}
-                    set deptypes {}
+                    set depends [list]
+                    set deptypes [list]
 
                     # Determine deptypes to look for based on target
                     switch $target {
                         fetch       -
-                        checksum    { set deptypes "depends_fetch" }
-                        extract     { set deptypes "depends_fetch depends_extract" }
-                        patch       { set deptypes "depends_fetch depends_extract depends_patch" }
+                        checksum    { set deptypes [list depends_fetch] }
+                        extract     { set deptypes [list depends_fetch depends_extract] }
+                        patch       { set deptypes [list depends_fetch depends_extract depends_patch] }
                         configure   -
-                        build       { set deptypes "depends_fetch depends_extract depends_patch depends_lib depends_build" }
-                        test        { set deptypes "depends_fetch depends_extract depends_patch depends_lib depends_build depends_run depends_test" }
+                        build       { set deptypes [list depends_fetch depends_extract depends_patch depends_lib depends_build] }
+                        test        { set deptypes [list depends_fetch depends_extract depends_patch depends_lib depends_build depends_run depends_test] }
                         destroot    -
                         dmg         -
                         pkg         -
                         portpkg     -
                         mpkg        -
                         mdmg        -
-                        ""          { set deptypes "depends_fetch depends_extract depends_patch depends_lib depends_build depends_run" }
+                        ""          { set deptypes [list depends_fetch depends_extract depends_patch depends_lib depends_build depends_run] }
 
                         # install may be run given an archive, which means
                         # depends_fetch, _extract, _build dependencies have
                         # never been installed
                         activate    -
-                        install     { set deptypes "depends_lib depends_run" }
+                        install     { set deptypes [list depends_lib depends_run] }
                     }
 
                     # Gather the dependencies for deptypes
@@ -1593,7 +1517,7 @@ proc target_run {ditem} {
                 }
 
                 # For {} blocks in the Portfile, export DEVELOPER_DIR to prevent Xcode binaries if shouldn't be used
-                set ::env(DEVELOPER_DIR) [option configure.developer_dir]
+                set env(DEVELOPER_DIR) [option configure.developer_dir]
                 if {$result == 0} {
                     foreach pre [ditem_key $ditem pre] {
                         ui_debug "Executing $pre"
@@ -1624,7 +1548,7 @@ proc target_run {ditem} {
                     }
                 }
                 # Keep the environment clean by unsetting DEVELOPER_DIR
-                unset -nocomplain ::env(DEVELOPER_DIR)
+                unset -nocomplain env(DEVELOPER_DIR)
 
                 # Check dependencies & file creations outside workpath.
                 if {[tbool ports_trace]
@@ -1704,6 +1628,10 @@ proc target_run {ditem} {
         unset env(TMPDIR)
     }
 
+    if {[geteuid] == 0} {
+        dropPrivileges
+    }
+
     return $result
 }
 
@@ -1733,7 +1661,7 @@ proc recursive_collect_deps {portname {depsfound {}}} \
 
 
 proc eval_targets {target} {
-    global targets subport version revision portvariants
+    global portutil::targets subport version revision portvariants
     set dlist $targets
 
     # the statefile will likely be autocleaned away after install,
@@ -1745,8 +1673,9 @@ proc eval_targets {target} {
         } elseif {$target eq "activate"} {
             set regref [registry_open $subport $version $revision $portvariants ""]
             # Set requested flag in the registry if in options
-            if {[info exists ::user_options(ports_requested)]} {
-                registry_prop_store $regref requested $::user_options(ports_requested)
+            global user_options
+            if {[info exists user_options(ports_requested)]} {
+                registry_prop_store $regref requested $user_options(ports_requested)
             }
             if {[registry_prop_retr $regref active] != 0} {
                 # Something to close the registry entry may be called here, if it existed.
@@ -1809,10 +1738,16 @@ proc open_statefile {args} {
     if {![tbool ports_dryrun]} {
         set need_chown 0
         if {![file isdirectory $workpath/.home]} {
+            if {[getuid] == 0 && [geteuid] != 0} {
+                elevateToRoot create_workpath
+            }
             file mkdir $workpath/.home
             set need_chown 1
         }
         if {![file isdirectory $workpath/.tmp]} {
+            if {[getuid] == 0 && [geteuid] != 0} {
+                elevateToRoot create_workpath
+            }
             file mkdir $workpath/.tmp
             set need_chown 1
         }
@@ -1821,6 +1756,9 @@ proc open_statefile {args} {
         }
         # Create a symlink to the workpath for port authors
         if {[tbool place_worksymlink] && ![file isdirectory $worksymlink]} {
+            if {[getuid] == 0 && [geteuid] != 0} {
+                elevateToRoot place_worksymlink
+            }
             ui_debug "Attempting ln -sf $workpath $worksymlink"
             ln -sf $workpath $worksymlink
         }
@@ -1993,7 +1931,7 @@ proc check_statefile_variants {variations oldvariations fd} {
     upvar $variations upvariations
     upvar $oldvariations upoldvariations
 
-    array set upoldvariations {}
+    set upoldvariations [dict create]
 
     set variants_found no
     set targets_found no
@@ -2002,7 +1940,7 @@ proc check_statefile_variants {variations oldvariations fd} {
     seek $fd 0
     while {[gets $fd line] >= 0} {
         if {[regexp $variant_re $line match name]} {
-            set upoldvariations([string range $name 1 end]) [string range $name 0 0]
+            dict set upoldvariations [string range $name 1 end] [string range $name 0 0]
             set variants_found yes
         }
         if {[regexp $target_re $line]} {
@@ -2016,11 +1954,11 @@ proc check_statefile_variants {variations oldvariations fd} {
     }
 
     set mismatch 0
-    if {[array size upoldvariations] != [array size upvariations]} {
+    if {[dict size $upoldvariations] != [dict size $upvariations]} {
         set mismatch 1
     } else {
-        foreach key [array names upvariations *] {
-            if {![info exists upoldvariations($key)] || $upvariations($key) ne $upoldvariations($key)} {
+        dict for {key val} $upvariations {
+            if {![dict exists $upoldvariations $key] || $val ne [dict get $upoldvariations $key]} {
                 set mismatch 1
                 break
             }
@@ -2074,7 +2012,7 @@ proc variant_run {ditem} {
     # test for conflicting variants
     foreach v [ditem_key $ditem conflicts] {
         if {[variant_isset $v]} {
-            ui_error "[option name]: Variant $name conflicts with $v"
+            ui_error "[option subport]: Variant $name conflicts with $v"
             return 1
         }
     }
@@ -2082,7 +2020,7 @@ proc variant_run {ditem} {
     # execute proc with same name as variant.
     if {[catch "variant-${name}" result]} {
         ui_debug $::errorInfo
-        ui_error "[option name]: Error executing $name: $result"
+        ui_error "[option subport]: Error executing $name: $result"
         return 1
     }
     return 0
@@ -2096,11 +2034,10 @@ proc variant_run {ditem} {
     # variants in a string in a standard order as +var1+var2 etc.
     # Can also do the same for -variants, for recording the negated list.
 proc canonicalize_variants {variants {sign "+"}} {
-    array set vara $variants
     set result ""
-    set vlist [lsort -ascii [array names vara]]
+    set vlist [lsort -ascii [dict keys $variants]]
     foreach v $vlist {
-        if {$vara($v) eq $sign} {
+        if {[dict get $variants $v] eq $sign} {
             append result "${sign}${v}"
         }
     }
@@ -2108,13 +2045,10 @@ proc canonicalize_variants {variants {sign "+"}} {
 }
 
 proc eval_variants {variations} {
-    global all_variants PortInfo requested_variations portvariants requested_variants
+    global PortInfo portutil::all_variants subport
     set dlist $all_variants
     upvar $variations upvariations
-    set chosen [choose_variants $dlist upvariations]
-    set negated [lindex $chosen 1]
-    set chosen [lindex $chosen 0]
-    set portname [option subport]
+    lassign [choose_variants $dlist upvariations] chosen negated
 
     # Check to make sure the requested variations are available with this
     # port, if one is not, warn the user and remove the variant from the
@@ -2122,7 +2056,7 @@ proc eval_variants {variations} {
     foreach key [array names upvariations *] {
         if {![info exists PortInfo(variants)] ||
             $key ni $PortInfo(variants)} {
-            ui_debug "Requested variant $upvariations($key)$key is not provided by port $portname."
+            ui_debug "Requested variant $upvariations($key)$key is not provided by port $subport."
             array unset upvariations $key
         }
     }
@@ -2155,15 +2089,17 @@ proc eval_variants {variations} {
     foreach dvar $newlist {
         set thevar [ditem_key $dvar provides]
         if {[info exists upvariations($thevar)] && $upvariations($thevar) eq "-"} {
-            set chosenlist ""
+            set chosenlist [list]
             foreach choice $chosen {
                 lappend chosenlist +[ditem_key $choice provides]
             }
-            ui_error "Inconsistent variant specification: $portname variant +$thevar is required by at least one of $chosenlist, but specified -$thevar"
+            ui_error "Inconsistent variant specification: $subport variant +$thevar is required by at least one of $chosenlist, but specified -$thevar"
             return 1
         }
         lappend activevariants $thevar "+"
     }
+
+    global requested_variations portvariants
 
     # Record a canonical variant string, used e.g. in accessing the registry
     set portvariants [canonicalize_variants $activevariants]
@@ -2189,15 +2125,16 @@ proc eval_variants {variations} {
             lappend negated_list $thevar "-"
         }
     }
+    global requested_variants
     set requested_variants [canonicalize_variants $requested_list "+"][canonicalize_variants $negated_list "-"]
 
     return 0
 }
 
 proc check_variants {target} {
-    global targets ports_force ports_dryrun PortInfo
+    global portutil::targets ports_force ports_dryrun PortInfo
     set result 0
-    array set variations $PortInfo(active_variants)
+    set variations $PortInfo(active_variants)
 
     # Make sure the variations match those stored in the statefile.
     # If they don't match, print an error indicating a 'port clean'
@@ -2223,15 +2160,14 @@ proc check_variants {target} {
 
         set state_fd [open_statefile]
 
-        array set oldvariations {}
         if {![tbool ports_force] && [check_statefile_variants variations oldvariations $state_fd]} {
-            ui_error "Requested variants \"[canonicalize_variants [array get variations]]\" do not match those the build was started with: \"[canonicalize_variants [array get oldvariations]]\"."
+            ui_error "Requested variants \"[canonicalize_variants $variations]\" do not match those the build was started with: \"[canonicalize_variants $oldvariations]\"."
             ui_error "Please use the same variants again, or run 'port clean [option subport]' first to remove the existing partially completed build."
             set result 1
         } elseif {![tbool ports_dryrun]} {
             # Write variations out to the statefile
-            foreach key [array names variations *] {
-                write_statefile variant $variations($key)$key $state_fd
+            dict for {key val} $variations {
+                write_statefile variant ${val}${key} $state_fd
             }
         }
 
@@ -2243,22 +2179,24 @@ proc check_variants {target} {
 
 # add the default universal variant if appropriate
 proc universal_setup {args} {
+    global configure.universal_archs universal_variant os.universal_supported \
+           use_xmkmf configure.compiler
     if {[variant_exists universal]} {
-        if {[llength [option configure.universal_archs]] >= 2} {
+        if {[llength ${configure.universal_archs}] >= 2} {
             ui_debug "universal variant already exists, so not adding the default one"
         } else {
             ui_debug "removing universal variant due to < 2 supported universal_archs"
             variant_delete universal
         }
-    } elseif {[exists universal_variant] && ![option universal_variant]} {
+    } elseif {[info exists universal_variant] && !$universal_variant} {
         ui_debug "universal_variant is false, so not adding the default universal variant"
-    } elseif {[exists use_xmkmf] && [option use_xmkmf]} {
+    } elseif {[tbool use_xmkmf]} {
         ui_debug "using xmkmf, so not adding the default universal variant"
-    } elseif {![exists os.universal_supported] || ![option os.universal_supported]} {
+    } elseif {![tbool os.universal_supported]} {
         ui_debug "OS doesn't support universal builds, so not adding the default universal variant"
-    } elseif {[llength [option configure.universal_archs]] <= 1} {
+    } elseif {[llength ${configure.universal_archs}] <= 1} {
         ui_debug "only one arch supported, so not adding the default universal variant"
-    } elseif {![portconfigure::arch_flag_supported [option configure.compiler] yes]} {
+    } elseif {![portconfigure::arch_flag_supported ${configure.compiler} yes]} {
         ui_debug "Compiler doesn't support universal builds, so not adding the default universal variant"
     } else {
         ui_debug "adding the default universal variant"
@@ -2270,7 +2208,7 @@ proc universal_setup {args} {
 
 # constructor for target object
 proc target_new {name procedure} {
-    global targets
+    global portutil::targets
     set ditem [ditem_create]
 
     ditem_key $ditem name $name
@@ -2378,33 +2316,21 @@ proc variant_new {name} {
 
 proc handle_default_variants {option action {value ""}} {
     global PortInfo variations
-    switch -regex $action {
-        set|append {
-            # Retrieve the information associated with each variant.
-            if {![info exists PortInfo(vinfo)]} {
-                set PortInfo(vinfo) {}
-            }
-            array set vinfo $PortInfo(vinfo)
+    switch $action {
+        append -
+        set {
+            # Parse each value as a variant name and sign.
             set re {([-+])([-A-Za-z0-9_.]+)}
             foreach v $value {
                 if {[regexp $re $v whole val variant]} {
-                    # Retrieve the information associated with this variant.
-                    if {![info exists vinfo($variant)]} {
-                        set vinfo($variant) {}
-                    }
-                    array unset info
-                    array set info $vinfo($variant)
-                    # Set is_default and update vinfo.
-                    set info(is_default) $val
-                    array set vinfo [list $variant [array get info]]
-
+                    # Set is_default in the associated vinfo.
+                    dict set PortInfo(vinfo) $variant is_default $val
+                    # Add the default value to variations if not already set
                     if {![info exists variations($variant)]} {
                         set variations($variant) $val
                     }
                 }
             }
-            # Update PortInfo(vinfo).
-            set PortInfo(vinfo) [array get vinfo]
         }
         delete {
             # xxx
@@ -2756,8 +2682,8 @@ proc get_portimage_path {} {
 proc supportedArchiveTypes {} {
     global supported_archive_types
     if {![info exists supported_archive_types]} {
-        set supported_archive_types {}
-        foreach type {tbz2 tbz tgz tar txz tlz xar zip cpgz cpio} {
+        set supported_archive_types [list]
+        foreach type [list tbz2 tbz tgz tar txz tlz xar zip cpgz cpio aar] {
             if {[catch {archiveTypeIsSupported $type}] == 0} {
                 lappend supported_archive_types $type
             }
@@ -2793,6 +2719,12 @@ proc find_portarchive_path {} {
 proc archiveTypeIsSupported {type} {
     set errmsg ""
     switch -regex $type {
+        aar {
+            set aa "aa"
+            if {[catch {set aa [findBinary $aa ${portutil::autoconf::aa_path}]} errmsg] == 0} {
+                return 0
+            }
+        }
         cp(io|gz) {
             set pax "pax"
             if {[catch {set pax [findBinary $pax ${portutil::autoconf::pax_path}]} errmsg] == 0} {
@@ -2862,7 +2794,8 @@ proc extract_archive_metadata {archive_location archive_type metadata_type} {
     switch -- $archive_type {
         xar -
         cpgz -
-        cpio {
+        cpio -
+        aar {
             set twostep 1
             global workpath
             if {[file isdirectory ${workpath}/.tmp]} {
@@ -2902,10 +2835,13 @@ proc extract_archive_metadata {archive_location archive_type metadata_type} {
         cpio {
             system -W ${tempdir} "[findBinary pax ${portutil::autoconf::pax_path}] -rf [shellescape $archive_location] +CONTENTS"
         }
+        aar {
+            system -W ${tempdir} "[findBinary aa ${portutil::autoconf::aa_path}] extract -i [shellescape $archive_location] -include-path +CONTENTS"
+        }
     }
     if {[info exists twostep]} {
         set fd [open "${tempdir}/+CONTENTS"]
-        set raw_contents [read $fd]
+        set raw_contents [read -nonewline $fd]
         close $fd
         file delete -force $tempdir
     }
@@ -3007,11 +2943,11 @@ proc merge {base} {
     global destroot configure.universal_archs
 
     # test which architectures are available, set one as base-architecture
-    set archs ""
+    set archs [list]
     set base_arch ""
     foreach arch ${configure.universal_archs} {
         if {[file exists "${base}/${arch}"]} {
-            set archs [concat ${archs} ${arch}]
+            lappend archs ${arch}
             set base_arch ${arch}
         }
     }
@@ -3193,7 +3129,6 @@ proc validate_macportsuser {} {
 
 # run code as a specified user
 proc exec_as_uid {uid code} {
-    global macportsuser
     set oldeuid [geteuid]
     if {$oldeuid != $uid} {
         if {$oldeuid != 0} {
@@ -3259,48 +3194,40 @@ proc _libtest {depspec {return_match 0}} {
     if {$i < 0} {set i [string length $depline]}
     set depname [string range $depline 0 $i-1]
     set depversion [string range $depline $i end]
-    regsub {\.} $depversion {\.} depversion
     if {${os.platform} eq "darwin"} {
-        set depregex \^${depname}${depversion}\\.dylib\$
+        set depfilename ${depname}${depversion}.dylib
     } else {
-        set depregex \^${depname}\\.so${depversion}\$
+        set depfilename ${depname}.so${depversion}
     }
 
-    return [_mportsearchpath $depregex $search_path 0 $return_match]
+    return [_mportsearchpath $depfilename $search_path 0 $return_match]
 }
 
 ### _bintest is private; subject to change without notice
 
 proc _bintest {depspec {return_match 0}} {
     global env
-    set depregex [lindex [split $depspec :] 1]
+    set depfilename [lindex [split $depspec :] 1]
 
     set search_path [split $env(PATH) :]
 
-    set depregex \^$depregex\$
-
-    return [_mportsearchpath $depregex $search_path 1 $return_match]
+    return [_mportsearchpath $depfilename $search_path 1 $return_match]
 }
 
 ### _pathtest is private; subject to change without notice
 
 proc _pathtest {depspec {return_match 0}} {
     global prefix
-    set depregex [lindex [split $depspec :] 1]
+    set dep_path [lindex [split $depspec :] 1]
 
-    # separate directory from regex
-    set fullname $depregex
+    # Prepend prefix if not an absolute path
+    set dep_path [file join $prefix $dep_path]
 
-    regexp {^(.*)/(.*?)$} "$fullname" match search_path depregex
+    # separate directory from filename
+    set search_path [list [file dirname $dep_path]]
+    set depfilename [file tail $dep_path]
 
-    if {[string index $search_path 0] ne "/"} {
-        # Prepend prefix if not an absolute path
-        set search_path "${prefix}/${search_path}"
-    }
-
-    set depregex \^$depregex\$
-
-    return [_mportsearchpath $depregex $search_path 0 $return_match]
+    return [_mportsearchpath $depfilename $search_path 0 $return_match]
 }
 
 # returns the name of the port that will actually be satisfying $depspec
@@ -3369,7 +3296,7 @@ proc get_canonical_archflags {{tool cc}} {
 
 # check that the selected archs are supported
 proc check_supported_archs {} {
-    global supported_archs build_arch universal_archs configure.build_arch configure.universal_archs subport
+    global supported_archs build_arch universal_archs configure.build_arch subport
     if {$supported_archs eq "noarch"} {
         return 0
     } elseif {[variant_exists universal] && [variant_isset universal]} {
@@ -3387,7 +3314,8 @@ proc check_supported_archs {} {
 
 # check if the installed xcode version is new enough
 proc _check_xcode_version {} {
-    global os.subplatform os.major macos_version_major xcodeversion use_xcode subport
+    global os.subplatform os.major macos_version_major xcodeversion \
+           xcodecltversion use_xcode xcode_license_unaccepted subport
 
     if {${os.subplatform} eq "macosx"} {
         switch $macos_version_major {
@@ -3468,13 +3396,13 @@ proc _check_xcode_version {} {
             }
             14 {
                 set min 15.0
-                set ok 15.0
-                set rec 15.0
+                set ok 15.1
+                set rec 15.1
             }
             default {
                 set min 15.0
-                set ok 15.0
-                set rec 15.0
+                set ok 15.1
+                set rec 15.1
             }
         }
         if {$xcodeversion eq "none"} {
@@ -3485,6 +3413,9 @@ proc _check_xcode_version {} {
                 ui_error "Port ${subport} requires a full Xcode installation, which was not found on your system."
                 ui_error "You can install Xcode from the Mac App Store or https://developer.apple.com/xcode/"
                 return 1
+            } elseif {$xcodecltversion eq "none"} {
+                set missingdevtools 1
+                # Deal with this below after explaining possible problems.
             }
         } elseif {[vercmp $xcodeversion $min] < 0} {
             ui_error "The installed version of Xcode (${xcodeversion}) is too old to use on the installed OS version. Version $rec or later is recommended on macOS ${macos_version_major}."
@@ -3494,7 +3425,8 @@ proc _check_xcode_version {} {
         }
 
         # Xcode 4.3 and above requires the command-line utilities package to be installed.
-        if {[vercmp $xcodeversion 4.3] >= 0 || ($xcodeversion eq "none" && [file exists "/Applications/Xcode.app"])} {
+        # This will always be the case on 10.8 and later.
+        if {${os.major} >= 12 || [vercmp $xcodeversion >= 4.3]} {
             if {[vercmp $macos_version_major 10.9] >= 0} {
                 # on Mavericks, /usr/bin/make might always installed as a shim into the command line tools installer.
                 # Let's check for /Library/Developer/CommandLineTools, installed by the
@@ -3520,7 +3452,7 @@ proc _check_xcode_version {} {
             }
 
             if {${os.major} >= 18} {
-                global xcodecltversion configure.sdk_version macosx_sdk_version
+                global configure.sdk_version macosx_sdk_version
                 if {$xcodecltversion eq "none" && [file executable [file join $cltpath usr bin make]]} {
                     ui_warn "The Xcode Command Line Tools package appears to be installed, but its receipt appears to be missing."
                     ui_warn "The Command Line Tools may be outdated, which can cause problems."
@@ -3537,10 +3469,17 @@ proc _check_xcode_version {} {
                 }
             }
 
-            # Check whether users have agreed to the Xcode license agreement
-            catch {exec [findBinary xcrun $portutil::autoconf::xcrun_path] clang 2>@1} output
-            set output [join [lrange [split $output "\n"] 0 end-1] "\n"]
-            if {[string match -nocase "*license*" $output]} {
+            if {[info exists missingdevtools]} {
+                ui_error "Neither Xcode nor the Command Line Tools were found."
+                ui_error "Please install at least one of them to be able to build ports."
+                return 1
+            }
+            if {![tbool use_xcode] && ${os.major} >= 12 && $xcodecltversion ne "none" && [vercmp $xcodecltversion < $min]} {
+                ui_error "The installed version of the Command Line Tools for Xcode (${xcodecltversion}) is too old to use on the installed OS version. Please install version $ok or later on macOS ${macos_version_major}."
+                return 1
+            }
+
+            if {$xcode_license_unaccepted} {
                 ui_error "It seems you have not accepted the Xcode license; most ports will fail to build."
                 ui_error "Agree to the license by opening Xcode or running `sudo xcodebuild -license'."
                 return 1
@@ -3600,10 +3539,9 @@ proc _archive_available {} {
         set site $sites_entry
     }
     if {[string index $site end] ne "/"} {
-        append site "/[option archive.subdir]"
-    } else {
-        append site [option archive.subdir]
+        append site /
     }
+    append site [option archive.subdir]
     set url [portfetch::assemble_url $site $archivename]
     ui_debug "Fetching $archivename archive size"
     # curl getsize can return -1 instead of throwing an error for

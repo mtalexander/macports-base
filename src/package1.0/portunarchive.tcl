@@ -125,7 +125,7 @@ proc portunarchive::unarchive_start {args} {
 proc portunarchive::unarchive_command_setup {args} {
     global unarchive.env unarchive.cmd unarchive.pre_args unarchive.args \
            unarchive.post_args unarchive.type unarchive.path \
-           unarchive.pipe_cmd os.platform os.version env
+           unarchive.pipe_cmd
 
     # Define appropriate unarchive command and options
     set unarchive.env {}
@@ -135,6 +135,18 @@ proc portunarchive::unarchive_command_setup {args} {
     set unarchive.post_args {}
     set unarchive.pipe_cmd ""
     switch -regex ${unarchive.type} {
+        aar {
+            set aa "aa"
+            if {[catch {set aa [findBinary $aa ${portutil::autoconf::aa_path}]} errmsg] == 0} {
+                ui_debug "Using $aa"
+                set unarchive.cmd "$aa"
+                set unarchive.pre_args {extract -afsc-all -enable-dedup -enable-holes -v}
+                set unarchive.args "-i [shellescape ${unarchive.path}]"
+            } else {
+                ui_debug $errmsg
+                return -code error "No '$aa' was found on this system!"
+            }
+        }
         cp(io|gz) {
             set pax "pax"
             if {[catch {set pax [findBinary $pax ${portutil::autoconf::pax_path}]} errmsg] == 0} {
@@ -269,7 +281,7 @@ proc portunarchive::unarchive_main {args} {
 }
 
 proc portunarchive::unarchive_finish {args} {
-    global UI_PREFIX target_state_fd unarchive.file subport workpath destpath unarchive.skip
+    global UI_PREFIX target_state_fd unarchive.file subport workpath portpath destpath unarchive.skip
 
     if {${unarchive.skip}} {
         return 0
@@ -283,7 +295,7 @@ proc portunarchive::unarchive_finish {args} {
         file copy -force $plus_state $statefile
         file mtime $statefile [clock seconds]
         chownAsRoot $statefile
-        update_statefile checksum [sha256 file [option portpath]/Portfile] $statefile
+        update_statefile checksum [sha256 file ${portpath}/Portfile] $statefile
         set newstate 1
     } else {
         # fake it

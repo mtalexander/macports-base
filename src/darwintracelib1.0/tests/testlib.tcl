@@ -88,7 +88,6 @@ proc setup {rules} {
 
 proc tracelib_setup {} {
     global \
-        cwd \
         darwintrace_lib \
         env \
         fifo \
@@ -99,7 +98,7 @@ proc tracelib_setup {} {
     set fifo_mktemp_template "/tmp/macports-test-XXXXXX"
     set fifo [mktemp $fifo_mktemp_template]
 
-    set thread [thread::create -joinable {source threadsetup.tcl}]
+    set thread [thread::create -joinable [list source threadsetup.tcl]]
     thread::send $thread [list setup $fifo]
 
     tracelib setsandbox [join $sandbox :]
@@ -107,8 +106,8 @@ proc tracelib_setup {} {
 
     thread::send -async $thread [list run] tracelib_result
 
-    set ::env(DYLD_INSERT_LIBRARIES) $darwintrace_lib
-    set ::env(DARWINTRACE_LOG) $fifo
+    set env(DYLD_INSERT_LIBRARIES) $darwintrace_lib
+    set env(DARWINTRACE_LOG) $fifo
 }
 
 proc expect {{violations {}} {unknowns {}}} {

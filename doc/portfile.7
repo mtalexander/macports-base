@@ -217,13 +217,16 @@ E-mail address(es) of port maintainer(s).
 Declares which platforms are supported by the port.
 .br
 .Sy Type:
-.Em required
+.Em optional
 .br
 .Sy Values:
 .Em darwin freebsd
 .br
+.Sy Default:
+.Em darwin
+.br
 .Sy Example:
-.Dl platforms darwin
+.Dl platforms darwin freebsd
 .It Ic supported_archs
 The CPU architectures for which this port can be built.
 Archs currently supported by macOS are:
@@ -1054,6 +1057,37 @@ to
 .br
 .Sy Example:
 .Dl use_7z yes
+.It Ic use_dmg
+Use a disk image (dmg).
+Note that the arguments passed to 'hdiutil' are extensive, and can vary based
+on the Darwin release, other options, etc.
+As such, ports should not attempt to manipulate 'extract.post_args'.
+.br
+Sets
+.Ic extract.suffix
+to
+.Dq .dmg .
+.br
+Sets
+.Ic extract.cmd
+to
+.Dq hdiutil .
+.br
+Sets
+.Ic extract.pre_args
+to
+.Dq attach .
+.br
+Sets
+.Ic extract.post_args
+to
+.Dq -private -readonly -nobrowse -mountpoint ...etc... .
+.br
+.Sy Type:
+.Em optional
+.br
+.Sy Example:
+.Dl use_dmg yes
 .It Ic dist_subdir
 Create a sub-directory in
 .Ic distpath
@@ -2007,6 +2041,20 @@ standard output from the daemon may also be directed to the logfile.
 .br
 .Sy Example:
 .Dl startupitem.logfile ${prefix}/var/log/mydaemon.log
+.It Ic startupitem.logfile.stderr
+Path to a logfile for capturing standard error output from the daemon.
+.br
+.Sy Type:
+.Em optional
+.br
+.Sy Default:
+.Em startupitem.logfile
+.br
+.Sy Values:
+.Em path
+.br
+.Sy Example:
+.Dl startupitem.logfile.stderr ${prefix}/var/log/mydaemon.log
 .It Ic startupitem.logevents
 Control whether or not to log events to the log file.
 If this option is set, events with timestamps are logged to the logfile.
@@ -2672,11 +2720,6 @@ Create a temporary file using a
 .Ar template .
 See
 .Xr mktemp 3 .
-.It Ic mkstemp Ar template
-Create a temporary file securely using a
-.Ar template .
-See
-.Xr mkstemp 3 .
 .It Ic mkdtemp Ar template
 Create a temporary directory using a
 .Ar template .

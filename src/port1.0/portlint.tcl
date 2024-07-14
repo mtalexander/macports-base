@@ -249,13 +249,41 @@ proc portlint::lint_checksum {checksum_string} {
     return [list $errors $warnings]
 }
 
+# lint_platforms
+#
+# Checks a given Portfile platforms string.  Returns a list of lists.
+# The first member list is a list of error strings.
+# The second member list is a list of warning strings.
+#
+# Returns a list containing two empty lists if no issues are found.
+proc portlint::lint_platforms {platforms} {
+    set errors [list]
+    set warnings [list]
+
+    global lint_platforms
+
+    foreach platform $platforms {
+        set platname [lindex $platform 0]
+        if {$platname ni $lint_platforms} {
+            lappend errors "Unknown platform: $platname"
+        }
+    }
+
+    if {$platforms eq "darwin"} {
+        lappend warnings "Unnecessary platforms line as darwin is the default"
+    }
+
+    return [list $errors $warnings]
+}
+
 proc portlint::lint_start {args} {
     global UI_PREFIX subport
     ui_notice "$UI_PREFIX [format [msgcat::mc "Verifying Portfile for %s"] ${subport}]"
 }
 
 proc portlint::lint_main {args} {
-    global UI_PREFIX name portpath porturl ports_lint_nitpick
+    global UI_PREFIX portpath ports_lint_nitpick lint_required lint_optional
+    global {*}$lint_required {*}$lint_optional
     set portfile ${portpath}/Portfile
     set portdirs [split ${portpath} /]
     set last [llength $portdirs]
@@ -281,10 +309,11 @@ proc portlint::lint_main {args} {
     set require_after ""
     set seen_portsystem false
     set seen_portgroup false
+    set seen_platforms false
     set in_description false
     set prohibit_tabs false
 
-    array set portgroups {}
+    set portgroups [dict create]
 
     set local_variants [list]
 
@@ -375,16 +404,19 @@ proc portlint::lint_main {args} {
                 ui_error "Line $lineno has unrecognized PortGroup"
                 incr errors
             } else {
-                if {[info exists portgroups($portgroup)]} {
+                if {[dict exists $portgroups $portgroup]} {
                     ui_error "Line $lineno repeats inclusion of PortGroup $portgroup"
                     incr errors
                 } else {
-                    set portgroups($portgroup) $portgroupversion
+                    dict set portgroups $portgroup $portgroupversion
                 }
             }
             set seen_portgroup true
             set require_blank true
             set require_after "PortGroup"
+        }
+        if {[regexp {^\s*platforms\s} $line]} {
+            set seen_platforms true
         }
 
         # TODO: check for repeated variable definitions
@@ -435,7 +467,7 @@ proc portlint::lint_main {args} {
             incr warnings
         }
 
-        if {[regexp {^\s*compiler\.blacklist(?:-[a-z]+)?\s.*(["{]\S+(?:\s+\S+){2,}["}])} $line -> blacklist] && ![info exists portgroups(compiler_blacklist_versions)]} {
+        if {[regexp {^\s*compiler\.blacklist(?:-[a-z]+)?\s.*(["{]\S+(?:\s+\S+){2,}["}])} $line -> blacklist] && ![dict exists $portgroups compiler_blacklist_versions]} {
             ui_error "Line $lineno uses compiler.blacklist entry $blacklist which requires the compiler_blacklist_versions portgroup which has not been included"
             incr errors
         }
@@ -458,7 +490,7 @@ proc portlint::lint_main {args} {
     
             if {!$hashline
                     && ![regexp {^\s*(?:PortSystem|PortGroup|version|python\.versions|(?:perl5|php|ruby)\.branch(?:es)?|license|[A-Za-z0-9_]+\.setup)\s} $line]
-                    && [string first [option version] $line] != -1} {
+                    && [string first $version $line] != -1} {
                 ui_warn "Line $lineno seems to hardcode the version number, consider using \${version} instead"
                 incr warnings
             }
@@ -492,13 +524,11 @@ proc portlint::lint_main {args} {
 
     ###################################################################
 
-    global os.platform os.arch os.version version revision epoch \
-           description long_description platforms categories all_variants \
-           maintainers license homepage master_sites checksums patchfiles \
+    global porturl portutil::all_variants patchfiles \
            depends_fetch depends_extract depends_patch \
            depends_lib depends_build depends_run \
-           depends_test distfiles fetch.type lint_portsystem lint_platforms \
-           lint_required lint_optional replaced_by conflicts
+           depends_test distfiles fetch.type lint_portsystem \
+           replaced_by conflicts
     set portarch [get_canonical_archs]
 
     if {!$seen_portsystem} {
@@ -513,7 +543,7 @@ proc portlint::lint_main {args} {
 
     if {$seen_portgroup} {
         # Using a PortGroup is optional
-        foreach {portgroup portgroupversion} [array get portgroups] {
+        dict for {portgroup portgroupversion} $portgroups {
             if {![file exists [getportresourcepath $porturl "port1.0/group/${portgroup}-${portgroupversion}.tcl"]]} {
                 ui_error "Unknown PortGroup: $portgroup-$portgroupversion"
                 incr errors
@@ -524,7 +554,6 @@ proc portlint::lint_main {args} {
     }
 
     foreach req_var $lint_required {
-
         if {$req_var eq "master_sites"} {
             if {${fetch.type} ne "standard"} {
                 ui_info "OK: $req_var not required for fetch.type ${fetch.type}"
@@ -563,15 +592,17 @@ proc portlint::lint_main {args} {
         incr warnings
     }
 
-    if {[info exists platforms]} {
-        foreach platform $platforms {
-            set platname [lindex $platform 0]
-            if {$platname ni $lint_platforms} {
-                ui_error "Unknown platform: $platname"
-                incr errors
-            } else {
-                ui_info "OK: Found platform: $platname"
-            }
+    if {$seen_platforms && [info exists platforms]} {
+        set platforms_lint [portlint::lint_platforms $platforms]
+
+        foreach err [lindex $platforms_lint 0] {
+            ui_error $err
+            incr errors
+        }
+
+        foreach warning [lindex $platforms_lint 1] {
+            ui_warn $warning
+            incr warnings
         }
     }
 
@@ -602,21 +633,25 @@ proc portlint::lint_main {args} {
                 set name_ok false
             }
 
+            global portresourcepath
+            if {![info exists portresourcepath]} {
+                global porturl
+                set portresourcepath [getportresourcepath $porturl]
+            }
+
             if {![info exists variantdesc] || $variantdesc eq ""} {
                 # don't warn about missing descriptions for global variants
                 if {$variantname in $local_variants &&
-                    [variant_desc $porturl $variantname] eq ""} {
+                    [get_variant_description $variantname $portresourcepath] eq ""} {
                     ui_warn "Variant $variantname does not have a description"
                     incr warnings
                     set desc_ok false
                 } elseif {$variantdesc eq ""} {
                     set variantdesc "(pre-defined variant)"
                 }
-            } else {
-                if {[variant_desc $porturl $variantname] ne ""} {
-                    ui_warn "Variant $variantname overrides global description"
-                    incr warnings
-                }
+            } elseif {[get_variant_description $variantname $portresourcepath] ne ""} {
+                ui_warn "Variant $variantname overrides global description"
+                incr warnings
             }
 
             # Check if conflicting variants actually exist
@@ -645,7 +680,7 @@ proc portlint::lint_main {args} {
         incr variantnumber
     }
 
-    set all_depends {}
+    set all_depends [list]
     if {[info exists depends_fetch]} {
         lappend all_depends {*}$depends_fetch
     }
@@ -684,14 +719,14 @@ proc portlint::lint_main {args} {
     # Check for multiple dependencies
     foreach deptype {depends_extract depends_patch depends_lib depends_build depends_run depends_test} {
         if {[info exists $deptype]} {
-            array set depwarned {}
+            set depwarned [dict create]
             foreach depspec [set $deptype] {
-                if {![info exists depwarned($depspec)]
+                if {![dict exists $depwarned $depspec]
                         && [llength [lsearch -exact -all [set $deptype] $depspec]] > 1} {
                     ui_warn "Dependency $depspec specified multiple times in $deptype"
                     incr warnings
                     # Report each depspec only once
-                    set depwarned($depspec) yes
+                    dict set depwarned $depspec yes
                 }
             }
         }

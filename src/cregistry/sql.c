@@ -136,12 +136,13 @@ int create_tables(sqlite3* db, reg_error* errPtr) {
 #if SQLITE_VERSION_NUMBER >= 3022000
         "PRAGMA journal_mode=WAL",
 #endif
+        "PRAGMA foreign_keys = ON",
 
         "BEGIN",
 
         /* metadata table */
         "CREATE TABLE registry.metadata (key UNIQUE, value)",
-        "INSERT INTO registry.metadata (key, value) VALUES ('version', '1.211')",
+        "INSERT INTO registry.metadata (key, value) VALUES ('version', '1.215')",
         "INSERT INTO registry.metadata (key, value) VALUES ('created', strftime('%s', 'now'))",
 
         /* ports table */
@@ -177,7 +178,8 @@ int create_tables(sqlite3* db, reg_error* errPtr) {
             ", actual_path TEXT"
             ", active INTEGER"
             ", binary BOOL"
-            ", FOREIGN KEY(id) REFERENCES ports(id))",
+            ", FOREIGN KEY(id) REFERENCES ports(id)"
+            " ON DELETE CASCADE)",
         "CREATE INDEX registry.file_port ON files(id)",
         "CREATE INDEX registry.file_path ON files(path)",
         "CREATE INDEX registry.file_actual ON files(actual_path)",
@@ -188,7 +190,8 @@ int create_tables(sqlite3* db, reg_error* errPtr) {
               "id INTEGER"
             ", name TEXT"
             ", variants TEXT"
-            ", FOREIGN KEY(id) REFERENCES ports(id))",
+            ", FOREIGN KEY(id) REFERENCES ports(id)"
+            " ON DELETE CASCADE)",
         "CREATE INDEX registry.dep_id ON dependencies(id)",
         "CREATE INDEX registry.dep_name ON dependencies(name)",
 
@@ -199,9 +202,42 @@ int create_tables(sqlite3* db, reg_error* errPtr) {
             ", version TEXT COLLATE VERSION"
             ", size INTEGER"
             ", sha256 TEXT"
-            ", FOREIGN KEY(id) REFERENCES ports(id))",
+            ", FOREIGN KEY(id) REFERENCES ports(id)"
+            " ON DELETE CASCADE)",
         "CREATE INDEX registry.portgroup_id ON portgroups(id)",
         "CREATE INDEX registry.portgroup_open ON portgroups(id, name, version, size, sha256)",
+
+        /* snapshots table */
+        "CREATE TABLE registry.snapshots ("
+              "id INTEGER PRIMARY KEY"
+            ", created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL"
+            ", note TEXT"
+            ")",
+
+        /* snapshot ports table */
+        /* a complete copy of all the installed ports for a snapshot */
+        "CREATE TABLE registry.snapshot_ports ("
+              "id INTEGER PRIMARY KEY"
+            ", snapshots_id INTEGER"
+            ", port_name TEXT COLLATE NOCASE"
+            ", requested INTEGER"
+            ", state TEXT COLLATE NOCASE"
+            ", variants TEXT"
+            ", requested_variants TEXT"
+            ", FOREIGN KEY(snapshots_id) REFERENCES snapshots(id)"
+            " ON DELETE CASCADE"
+            ")",
+
+        /* Files registered to ports in snapshots.
+           Needed to resolve file-based dependencies. */
+        "CREATE TABLE registry.snapshot_files ("
+              "id INTEGER"
+            ", path TEXT"
+            ", FOREIGN KEY(id) REFERENCES snapshot_ports(id)"
+            " ON DELETE CASCADE"
+            ")",
+        "CREATE INDEX registry.snapshot_file_path ON snapshot_files(path)",
+        "CREATE INDEX registry.snapshot_file_id ON snapshot_files(id)",
 
         "COMMIT",
         NULL
@@ -255,6 +291,9 @@ int update_db(sqlite3* db, reg_error* errPtr) {
     char* q_version = "SELECT value FROM registry.metadata WHERE key = 'version'";
     char* query = q_begin;
     sqlite3_stmt* stmt = NULL;
+
+    /* Disable foreign key constraints while we're changing the schema. */
+    sqlite3_exec(db, "PRAGMA foreign_keys = OFF", NULL, NULL, NULL);
 
     do {
         did_update = 0;
@@ -699,14 +738,12 @@ int update_db(sqlite3* db, reg_error* errPtr) {
 #endif
 
                 "UPDATE registry.metadata SET value = '1.204' WHERE key = 'version'",
-
                 "COMMIT",
                 NULL
             };
 
             sqlite3_finalize(stmt);
             stmt = NULL;
-
             if (!do_queries(db, version_1_204_queries, errPtr)) {
                 rollback_db(db);
                 return 0;
@@ -859,6 +896,179 @@ int update_db(sqlite3* db, reg_error* errPtr) {
             continue;
         }
 
+        if (sql_version(NULL, -1, version, -1, "1.212") < 0) {
+            /* Add tables required for the snapshot functionality used by 'port
+             * snapshot', 'port migrate' and 'port restore'. */
+
+            static char* version_1_212_queries[] = {
+
+                /* snapshots table */
+                "CREATE TABLE registry.snapshots ("
+                      "id INTEGER PRIMARY KEY"
+                    ", created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL"
+                    ", note TEXT"
+                    ")",
+
+                /* snapshot ports table */
+                "CREATE TABLE registry.snapshot_ports ("
+                      "id INTEGER PRIMARY KEY"
+                    ", snapshots_id INTEGER"
+                    ", port_name TEXT COLLATE NOCASE"
+                    ", requested INTEGER"
+                    ", state TEXT COLLATE NOCASE"
+                    ", variants TEXT"
+                    ", requested_variants TEXT"
+                    ", FOREIGN KEY(snapshots_id) REFERENCES snapshots(id)"
+                    " ON DELETE CASCADE"
+                    ")",
+
+                /* Update version and commit */
+                "UPDATE registry.metadata SET value = '1.212' WHERE key = 'version'",
+                "COMMIT",
+                NULL
+            };
+
+            sqlite3_finalize(stmt);
+            stmt = NULL;
+
+            if (!do_queries(db, version_1_212_queries, errPtr)) {
+                rollback_db(db);
+                return 0;
+            }
+
+            did_update = 1;
+            continue;
+        }
+
+        if (sql_version(NULL, -1, version, -1, "1.213") < 0) {
+            /* Add files to snapshots */
+
+            static char* version_1_213_queries[] = {
+
+                /* Files registered to ports in snapshots.
+                   Needed to resolve file-based dependencies. */
+                "CREATE TABLE registry.snapshot_files ("
+                      "id INTEGER"
+                    ", path TEXT"
+                    ", FOREIGN KEY(id) REFERENCES snapshot_ports(id)"
+                    " ON DELETE CASCADE"
+                    ")",
+                "CREATE INDEX registry.snapshot_file_path ON snapshot_files(path)",
+
+                /* Update version and commit */
+                "UPDATE registry.metadata SET value = '1.213' WHERE key = 'version'",
+                "COMMIT",
+                NULL
+            };
+
+            sqlite3_finalize(stmt);
+            stmt = NULL;
+
+            if (!do_queries(db, version_1_213_queries, errPtr)) {
+                rollback_db(db);
+                return 0;
+            }
+
+            did_update = 1;
+            continue;
+        }
+
+        if (sql_version(NULL, -1, version, -1, "1.214") < 0) {
+            /* Add cascading deletes to foreign key constraints.
+               Unfortunately ALTER TABLE can't do this in sqlite, so
+               we have to copy the data into new tables that have the
+               right constraint, then drop the old ones and rename, and
+               then recreate the indices that were dropped with the old
+               tables. */
+
+            static char* version_1_214_queries[] = {
+
+                /* file map */
+                "CREATE TABLE registry.tmp_files ("
+                      "id INTEGER"
+                    ", path TEXT"
+                    ", actual_path TEXT"
+                    ", active INTEGER"
+                    ", binary BOOL"
+                    ", FOREIGN KEY(id) REFERENCES ports(id)"
+                    " ON DELETE CASCADE)",
+                "INSERT INTO registry.tmp_files SELECT * FROM registry.files",
+                "DROP TABLE registry.files",
+                "ALTER TABLE registry.tmp_files RENAME TO files",
+                "CREATE INDEX registry.file_port ON files(id)",
+                "CREATE INDEX registry.file_path ON files(path)",
+                "CREATE INDEX registry.file_actual ON files(actual_path)",
+                "CREATE INDEX registry.file_actual_nocase ON files(actual_path COLLATE NOCASE)",
+
+                /* dependency map */
+                "CREATE TABLE registry.tmp_dependencies ("
+                      "id INTEGER"
+                    ", name TEXT"
+                    ", variants TEXT"
+                    ", FOREIGN KEY(id) REFERENCES ports(id)"
+                    " ON DELETE CASCADE)",
+                "INSERT INTO registry.tmp_dependencies SELECT * FROM registry.dependencies",
+                "DROP TABLE registry.dependencies",
+                "ALTER TABLE registry.tmp_dependencies RENAME TO dependencies",
+                "CREATE INDEX registry.dep_id ON dependencies(id)",
+                "CREATE INDEX registry.dep_name ON dependencies(name)",
+
+                /* portgroups table */
+                "CREATE TABLE registry.tmp_portgroups ("
+                      "id INTEGER"
+                    ", name TEXT"
+                    ", version TEXT COLLATE VERSION"
+                    ", size INTEGER"
+                    ", sha256 TEXT"
+                    ", FOREIGN KEY(id) REFERENCES ports(id)"
+                    " ON DELETE CASCADE)",
+                "INSERT INTO registry.tmp_portgroups SELECT * FROM registry.portgroups",
+                "DROP TABLE registry.portgroups",
+                "ALTER TABLE registry.tmp_portgroups RENAME TO portgroups",
+                "CREATE INDEX registry.portgroup_id ON portgroups(id)",
+                "CREATE INDEX registry.portgroup_open ON portgroups(id, name, version, size, sha256)",
+
+                /* Update version and commit */
+                "UPDATE registry.metadata SET value = '1.214' WHERE key = 'version'",
+                "COMMIT",
+                NULL
+            };
+
+            sqlite3_finalize(stmt);
+            stmt = NULL;
+
+            if (!do_queries(db, version_1_214_queries, errPtr)) {
+                rollback_db(db);
+                return 0;
+            }
+
+            did_update = 1;
+            continue;
+        }
+
+        if (sql_version(NULL, -1, version, -1, "1.215") < 0) {
+
+            static char* version_1_215_queries[] = {
+                "CREATE INDEX registry.snapshot_file_id ON snapshot_files(id)",
+
+                /* Update version and commit */
+                "UPDATE registry.metadata SET value = '1.215' WHERE key = 'version'",
+                "COMMIT",
+                NULL
+            };
+
+            sqlite3_finalize(stmt);
+            stmt = NULL;
+
+            if (!do_queries(db, version_1_215_queries, errPtr)) {
+                rollback_db(db);
+                return 0;
+            }
+
+            did_update = 1;
+            continue;
+        }
+
 
         /* add new versions here, but remember to:
          *  - finalize the version query statement and set stmt to NULL
@@ -869,7 +1079,7 @@ int update_db(sqlite3* db, reg_error* errPtr) {
          *  - update the current version number below
          */
 
-        if (sql_version(NULL, -1, version, -1, "1.211") > 0) {
+        if (sql_version(NULL, -1, version, -1, "1.215") > 0) {
             /* the registry was already upgraded to a newer version and cannot be used anymore */
             reg_throw(errPtr, REG_INVALID, "Version number in metadata table is newer than expected.");
             sqlite3_finalize(stmt);

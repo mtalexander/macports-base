@@ -117,7 +117,7 @@ proc portclean::clean_dist {args} {
 
     set count 0
     if {![info exists patchfiles]} {
-        set patchfiles ""
+        set patchfiles [list]
     }
     foreach file $patchfiles {
         set patchfile [getdistname $file]
@@ -144,7 +144,7 @@ proc portclean::clean_dist {args} {
     if {$dist_subdir ne $name} {
         if {!([info exists ports_force] && $ports_force eq "yes")
             && [file isdirectory $distpath]
-            && [llength [readdir $distpath]] > 0} {
+            && ![dirempty $distpath]} {
             ui_warn [format [msgcat::mc "Distfiles directory '%s' may contain distfiles needed for other ports, use the -f flag to force removal" ] $distpath]
         } else {
             lappend dirlist $dist_subdir
@@ -225,7 +225,7 @@ proc portclean::clean_archive {args} {
     if {[info exists ports_version_glob]} {
         # Match all possible archive variants that match the version
         # glob specified by the user.
-        set fileglob "$subport-[option ports_version_glob]*.*.*.*"
+        set fileglob "$subport-${ports_version_glob}*.*.*.*"
     } else {
         # Match all possible archives for this port.
         set fileglob "$subport-*_*.*.*.*"

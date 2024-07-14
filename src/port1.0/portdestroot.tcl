@@ -62,25 +62,26 @@ default destroot.destdir {DESTDIR=${destroot}}
 default destroot.nice {${buildnicevalue}}
 default destroot.umask {$system_options(destroot_umask)}
 default destroot.clean no
-default destroot.keepdirs ""
+default destroot.keepdirs {}
 default destroot.violate_mtree no
 default destroot.delete_la_files {${delete_la_files}}
 
 set_ui_prefix
 
 proc portdestroot::destroot_getargs {args} {
-    if {(([option build.type] eq "default" && [option os.platform] ne "freebsd") || \
-         ([option build.type] eq "gnu")) \
-        && [regexp "^(/\\S+/|)(g|gnu|)make(\\s+.*|)$" [option destroot.cmd]]} {
+    global build.type os.platform destroot.cmd destroot.target
+    if {((${build.type} eq "default" && ${os.platform} ne "freebsd") ||
+         (${build.type} eq "gnu"))
+        && [regexp "^(/\\S+/|)(g|gnu|)make(\\s+.*|)$" ${destroot.cmd}]} {
         # Print "Entering directory" lines for better log debugging
-        return "-w [option destroot.target]"
+        return "-w ${destroot.target}"
     }
 
-    return "[option destroot.target]"
+    return ${destroot.target}
 }
 
 proc portdestroot::destroot_start {args} {
-    global UI_PREFIX prefix subport porturl destroot os.platform destroot.clean portsharepath \
+    global UI_PREFIX prefix subport destroot os.platform destroot.clean portsharepath \
            destroot.umask destroot.asroot euid egid \
            applications_dir frameworks_dir
     variable oldmask
@@ -131,8 +132,7 @@ proc portdestroot::destroot_main {args} {
 
 proc portdestroot::destroot_finish {args} {
     global UI_PREFIX destroot prefix subport destroot.violate_mtree \
-           applications_dir frameworks_dir destroot.keepdirs destroot.delete_la_files \
-           os.platform os.version
+           applications_dir frameworks_dir destroot.keepdirs destroot.delete_la_files
     variable oldmask
 
     foreach fileToDelete {share/info/dir lib/charset.alias} {
@@ -201,13 +201,21 @@ proc portdestroot::destroot_finish {args} {
         return -code error "Staging $subport into destroot failed"
     }
 
-    # Compress all manpages with gzip (instead)
-    set manpath "${destroot}${prefix}/share/man"
-    set gzip [findBinary gzip ${portutil::autoconf::gzip_path}]
-    set gunzip "$gzip -d"
-    set bunzip2 "[findBinary bzip2 ${portutil::autoconf::bzip2_path}] -d"
-    if {[file isdirectory ${manpath}] && [file type ${manpath}] eq "directory"} {
+    # Compress all manpages with gzip (instead) if not building for a
+    # platform where the system tar supports --hfsCompression,
+    # i.e. macOS 10.15 (darwin 19) or later.
+    lassign [_get_compatible_platform] compat_os_platform compat_os_major
+    set manpath ${destroot}${prefix}/share/man
+    if {($compat_os_platform ne "darwin" || ![string is integer -strict $compat_os_major]
+        || $compat_os_major < 19 || [getuid] != 0)
+        && [file isdirectory ${manpath}] && [file type ${manpath}] eq "directory"
+    } then {
         ui_info "$UI_PREFIX [format [msgcat::mc "Compressing man pages for %s"] ${subport}]"
+
+        set gzip [findBinary gzip ${portutil::autoconf::gzip_path}]
+        set gunzip "$gzip -d"
+        set bunzip2 "[findBinary bzip2 ${portutil::autoconf::bzip2_path}] -d"
+
         set found 0
         set manlinks [list]
         set mandir_re {^(cat|man)(.)$}
@@ -333,7 +341,7 @@ proc portdestroot::destroot_finish {args} {
                 } else {
                     set dir_allowed no
                     # these files are (at least potentially) outside of the prefix
-                    foreach dir "$applications_dir $frameworks_dir /Library/LaunchAgents /Library/LaunchDaemons /Library/StartupItems" {
+                    foreach dir [list $applications_dir $frameworks_dir /Library/LaunchAgents /Library/LaunchDaemons /Library/StartupItems] {
                         if {[string equal -length [expr {[string length $dfile] + 1}] $dfile/ $dir]} {
                             # it's a prefix of one of the allowed paths
                             set dir_allowed yes
@@ -361,12 +369,12 @@ proc portdestroot::destroot_finish {args} {
 
         # abort here only so all violations can be observed
         if { ${mtree_violation} ne "no" } {
-            ui_warn "[format [msgcat::mc "%s violates the layout of the ports-filesystems!"] [option subport]]"
+            ui_warn "[format [msgcat::mc "%s violates the layout of the ports-filesystems!"] $subport]"
             ui_warn "Please fix or indicate this misbehavior (if it is intended), it will be an error in future releases!"
             # error "mtree violation!"
         }
     } else {
-        ui_warn "[format [msgcat::mc "%s installs files outside the common directory structure."] [option subport]]"
+        ui_warn "[format [msgcat::mc "%s installs files outside the common directory structure."] $subport]"
     }
 
     # Restore umask

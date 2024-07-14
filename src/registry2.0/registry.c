@@ -39,11 +39,13 @@
 #include <cregistry/registry.h>
 #include <cregistry/portgroup.h>
 #include <cregistry/entry.h>
+#include <cregistry/snapshot.h>
 #include <cregistry/file.h>
 
 #include "entry.h"
 #include "entryobj.h"
 #include "file.h"
+#include "snapshot.h"
 #include "portgroup.h"
 #include "registry.h"
 #include "util.h"
@@ -200,7 +202,7 @@ reg_registry* registry_for(Tcl_Interp* interp, int status) {
 }
 
 static int registry_open(ClientData clientData UNUSED, Tcl_Interp* interp,
-        int objc, Tcl_Obj* CONST objv[]) {
+        int objc, Tcl_Obj* const objv[]) {
     if (objc != 2) {
         Tcl_WrongNumArgs(interp, 1, objv, "db-file");
         return TCL_ERROR;
@@ -224,7 +226,7 @@ static int registry_open(ClientData clientData UNUSED, Tcl_Interp* interp,
 }
 
 static int registry_close(ClientData clientData UNUSED, Tcl_Interp* interp,
-        int objc, Tcl_Obj* CONST objv[]) {
+        int objc, Tcl_Obj* const objv[]) {
     if (objc != 1) {
         Tcl_WrongNumArgs(interp, 1, objv, NULL);
         return TCL_ERROR;
@@ -252,7 +254,7 @@ static int registry_close(ClientData clientData UNUSED, Tcl_Interp* interp,
 }
 
 static int registry_read(ClientData clientData UNUSED, Tcl_Interp* interp,
-        int objc, Tcl_Obj* CONST objv[]) {
+        int objc, Tcl_Obj* const objv[]) {
     if (objc != 2) {
         Tcl_WrongNumArgs(interp, 1, objv, "command");
         return TCL_ERROR;
@@ -288,7 +290,7 @@ static int registry_read(ClientData clientData UNUSED, Tcl_Interp* interp,
 }
 
 static int registry_write(ClientData clientData UNUSED, Tcl_Interp* interp,
-        int objc, Tcl_Obj* CONST objv[]) {
+        int objc, Tcl_Obj* const objv[]) {
     if (objc != 2) {
         Tcl_WrongNumArgs(interp, 1, objv, "command");
         return TCL_ERROR;
@@ -343,7 +345,7 @@ static int registry_write(ClientData clientData UNUSED, Tcl_Interp* interp,
  * Commands manipulating metadata in the registry. This can be called `registry::metadata`
  */
 int metadata_cmd(ClientData clientData UNUSED, Tcl_Interp* interp, int objc,
-        Tcl_Obj* CONST objv[]) {
+        Tcl_Obj* const objv[]) {
     if (objc < 3) {
         Tcl_WrongNumArgs(interp, 1, objv, "cmd key ?value?");
         return TCL_ERROR;
@@ -388,6 +390,17 @@ int metadata_cmd(ClientData clientData UNUSED, Tcl_Interp* interp, int objc,
     return TCL_ERROR;
 }
 
+/* Allow setting the needs_vacuum flag from scripts. */
+int set_needs_vacuum_cmd(ClientData clientData UNUSED, Tcl_Interp* interp, int objc,
+        Tcl_Obj* const objv[]) {
+    if (objc != 1) {
+        Tcl_WrongNumArgs(interp, 1, objv, "cmd");
+        return TCL_ERROR;
+    }
+    Tcl_SetAssocData(interp, "registry::needs_vacuum", NULL, (ClientData)1);
+    return TCL_OK;
+}
+
 /**
  * Initializer for the registry lib.
  *
@@ -403,9 +416,11 @@ int Registry_Init(Tcl_Interp* interp) {
     Tcl_CreateObjCommand(interp, "registry::read", registry_read, NULL, NULL);
     Tcl_CreateObjCommand(interp, "registry::write", registry_write, NULL, NULL);
     Tcl_CreateObjCommand(interp, "registry::entry", entry_cmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "registry::snapshot", snapshot_cmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "registry::file", file_cmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "registry::portgroup", portgroup_cmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "registry::metadata", metadata_cmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "registry::set_needs_vacuum", set_needs_vacuum_cmd, NULL, NULL);
     if (Tcl_PkgProvide(interp, "registry2", "2.0") != TCL_OK) {
         return TCL_ERROR;
     }

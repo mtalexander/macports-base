@@ -2,6 +2,156 @@
 # This is a log of major user-visible changes in each MacPorts release.
 ###
 
+Release 2.10.0 (unreleased)
+    - The number of outdated ports is printed after running
+      'port selfupdate'. (#33820, thelastlin in 4ae6d98)
+
+    - 'port selfupdate' now checks whether MacPorts base is outdated by
+      downloading a small file, and only downloads and extracts the
+      source code (via http(s)) if a new version needs to be installed.
+      Integrity of the source is checked using OpenBSD's signify(1).
+      The old rsync method is used as a fallback if the new method fails.
+      (#38265, cal in dd3acc4)
+
+    - Line continuation is supported in macports.conf by ending lines
+      with a backslash. (jmr in b86ef1e)
+
+    - Ports' files are now activated using clonefile() when on a
+      filesystem that supports cloning (such as APFS). This should
+      perform better and use less storage for active ports. Port images
+      are stored as directories rather than archives in this case. A
+      'portimage_mode' option has been added to macports.conf to
+      enable changing which method is used. (#69555, jmr in 4504942)
+
+    - The middle part of bin:, lib:, and path: depspecs is no longer
+      interpreted as a regex. This was mostly undocumented, almost
+      never used, and made it difficult to use paths containing
+      characters with special meaning in regexes.
+      (#69585, jmr in e0c1226)
+
+    - Added 'port migrate' action, which can be used after moving to a
+      new major OS version or CPU architecture to reinstall MacPorts
+      base and installed ports if needed. (umeshksingla in 6e2f453,
+      cal in 3f83ad1, 4317a32, f40f655, 72478b1 etc.)
+
+    - Added -t and -N options to the default patch.pre_args, to prevent
+      patch(1) on recent macOS versions from silently reverse-applying
+      already-applied patches. (vallon in b1f59d8)
+
+    - Updated the bundled Tcl to 8.6.14. (jmr in bc46d68)
+
+    - Added test.asroot option. (jmr in 6f0de6c)
+
+    - Prevented 'port rdeps --full' from looping infinitely when there
+      are circular dependencies. (#62711, jmr in 49df406)
+
+    - Performance improvements for many operations, particularly
+      boolean expressions and Portfile parsing. (jmr in a28e81c,
+      169b1ed, 2f3d072, c97e75d, 341d9a0, 46bc1af, etc.)
+
+    - Add progress bars to slow activation and deactivation operations.
+      (cal in b78e320b1, 5e669e4a0, 31c285116, cb3305837, effd43526)
+
+Release 2.9.3 (2024-04-04 by jmr)
+    - Fixed error due to insufficient privileges to create the work
+      symlink in some circumstances. (jmr in 51511c8)
+
+Release 2.9.2 (2024-04-02 by jmr)
+    - Fixed built-in architecture test failing on unreadable files.
+      (#69478, jmr in e3468c5)
+
+    - Fixed some issues that could occur if settings like 'prefix'
+      contained symlinks, by fully resolving and normalizing paths read
+      from the config file. (#69327, jmr in b69f0cf)
+
+    - Fixed privileges sometimes not being dropped for test target.
+      (jmr in d304c0a)
+
+Release 2.9.1 (2024-01-31 by jmr)
+    - Fixed installation of unneeded build-time dependencies when using
+      source-only mode. (cal in 5988c00)
+
+Release 2.9.0 (2024-01-24 by jmr)
+    - Upgrade will now update registry metadata if needed for ports
+      that are not outdated. This should hopefully cut down on revision
+      increases requiring a rebuild just to do things like add or
+      remove dependencies. (jmr in bec110b)
+
+    - Added new option 'startupitem.logfile.stderr'.
+      (#67955, mascguy in e70a512)
+
+    - Many single-letter command line options should now work when
+      given after the action name, and apply only to that action. A few
+      like -N can't easily be turned on and off internally, so if in
+      doubt, keep putting single-letter options before the action.
+      (jmr in aec0601)
+
+    - Ports that set platforms containing 'any' are now not considered
+      outdated after major OS updates. (#68256, jmr in 1b4db00)
+
+    - Dependencies installed for the first time when upgrading a port
+      no longer inherit all variants from the dependent port. Arch
+      checking is now done in this case so +universal is added to the
+      dependency iff needed. (#67637, jmr in 7be167c)
+
+    - Prevented rev-upgrade from complaining about weakly-linked libs
+      that are not present. (#52700, chrstphrchvz in 77e333a)
+
+    - Avoid installing build-time dependencies when force-upgrading an
+      installed port for which a binary archive will be used.
+      (#67017, jmr in a9597dc)
+
+    - Fixed error when running upgrade with -R and -u options.
+      (#68019, jmr in 980a5c1)
+
+    - Fixed rev-upgrade potentially trying to access registry entries
+      that have been uninstalled as a result of a rebuild.
+      (#66186, jmr in 1abd73a)
+
+    - Fixed missing make command potentially causing some ports to fail
+      to parse. (#60881, jmr in 1b4e6a1)
+
+    - Prevented destroot.keepdirs from creating files outside the
+      destroot. (#55673, jmr in 8db11c8)
+
+    - Running 'port install' on a port that is already installed will
+      set the requested flag for that port. (#55085, jmr in 7ed853d)
+
+    - Fixed trace mode on Intel macOS 13. (#66358, cal in 4a1b0c7)
+
+    - Fixed incorrect trace mode handling of setuid/setgid binaries.
+      (cal in 9cc9afc)
+
+    - Fixed the deactivate and uninstall actions sometimes not handling
+      multiple ports in correct dependency order if one or more of them
+      was specified with non-canonical case. (#60446, jmr in 772a9cc)
+
+    - Fixed port names that differ only in case not being considered
+      to be the same when evaulating boolean expressions.
+      (#50518, jmr in bd02a2f)
+
+    - Fixed some issues that could occur in the unusual case that a
+      mirror has an archive but not its corresponding signature.
+      (jmr in a774938, f7828b8)
+
+    - If the macports user has an incorrect home directory set somehow,
+      the installer should now fix it. (#49101, jmr in 128e8ce)
+
+    - Skip vacuuming the registry database on shutdown (after
+      uninstalling one or more ports) if it would not save significant
+      space. (jmr in c82a269)
+
+    - Clean up the SQLite write-ahead log file when closing the
+      registry. (jmr in 9bb06b9)
+
+    - Added a simple default test phase for all ports, which currently
+      just checks the architectures of installed files. 'test.run yes'
+      enables the tests defined by the Portfile, as before. It should
+      always be safe to run 'port test' now, and if it fails it means
+      a test didn't pass. (jmr in ddc2655)
+
+    - Using multiple threads for portindex. (jmr in f00bf80)
+
 Release 2.8.1 (2023-01-31 by jmr)
     - Fixed 'port lint' complaining about 'platforms any'.
       (jmr in 84d8683)

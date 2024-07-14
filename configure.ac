@@ -103,6 +103,7 @@ esac
 
 # Checks for programs.
 AC_PROG_CC([clang cc gcc])
+AC_PROG_GREP
 AC_PROG_INSTALL
 AC_PROG_LN_S
 AC_PROG_MAKE_SET
@@ -132,6 +133,7 @@ MP_TOOL_PATH(XAR, [xar])
 MP_TOOL_PATH(XZ, [xz])
 
 # Search for tool paths. Any set above (via --with-pkg=PATH) will be retained
+AC_PATH_PROG(AA, [aa], [])
 AC_PATH_PROGS(BSDMAKE, [bsdmake pmake], [])
 AC_PATH_PROG(BZIP2_BIN, [bzip2], [])
 AC_PATH_PROG(BZR, [bzr], [])
@@ -226,6 +228,18 @@ MP_CHECK_RUNUSER
 MP_DIRECTORY_MODE
 MP_SHARED_DIRECTORY
 
+# Don't set real uname or gname in .mtree files unless root
+# https://trac.macports.org/ticket/49501
+if test "$DSTUSR" = "root" ; then
+    MTREE_GNAME="$DSTGRP"
+else
+    # This has to be set to something or mtree won't create any directories.
+    # It doesn't matter what it's set to for non-root though, as it can't
+    # change the ownership anyway.
+    MTREE_GNAME="admin"
+fi
+AC_SUBST(MTREE_GNAME)
+
 # Check for default directories
 MP_PATH_APPLICATIONS
 MP_PATH_FRAMEWORKS
@@ -235,15 +249,25 @@ MP_CHECK_STARTUPITEMS
 MP_UNIVERSAL_OPTIONS
 
 # Check for standard header files.
-AC_CHECK_HEADERS([crt_externs.h err.h fcntl.h libkern/OSAtomic.h libproc.h limits.h paths.h pwd.h \
-	readline/history.h readline/readline.h stdatomic.h spawn.h sys/cdefs.h sys/event.h \
-	sys/fcntl.h sys/file.h sys/paths.h sys/socket.h sys/sysctl.h utime.h])
+AC_CHECK_HEADERS([crt_externs.h err.h fcntl.h libkern/OSAtomic.h libproc.h \
+    limits.h paths.h pwd.h readpassphrase.h readline/history.h \
+    readline/readline.h stdatomic.h spawn.h sys/attr.h sys/cdefs.h \
+    sys/clonefile.h sys/event.h sys/fcntl.h sys/file.h sys/paths.h \
+    sys/socket.h sys/sysctl.h utime.h])
+
+AC_CHECK_DECLS([RPP_STDIN], [], [], [[#include <readpassphrase.h>]])
+AC_SUBST(HAVE_DECL_RPP_STDIN, $ac_cv_have_decl_RPP_STDIN)
 
 # Checks for library functions.
 AC_CHECK_FUNCS([OSAtomicCompareAndSwap32 OSAtomicCompareAndSwap64 \
-	OSAtomicCompareAndSwapPtr __getdirentries64 clearenv copyfile \
-	_dyld_shared_cache_contains_path flock fls kqueue posix_spawn setmode \
-	sysctlbyname])
+	OSAtomicCompareAndSwapPtr __getdirentries64 arc4random_buf clearenv \
+	clonefile copyfile _dyld_shared_cache_contains_path flock fls \
+	getentropy kqueue posix_spawn setmode sysctlbyname timingsafe_bcmp])
+
+# For vendor/signify
+AC_SUBST(HAVE_ARC4RANDOM_BUF, $ac_cv_func_arc4random_buf)
+AC_SUBST(HAVE_GETENTROPY, $ac_cv_func_getentropy)
+AC_SUBST(HAVE_TIMINGSAFE_BCMP, $ac_cv_func_timingsafe_bcmp)
 
 # Check for library functions, replacements are in pextlib1.0/compat/
 AC_CHECK_FUNCS([getline getdelim strlcat strlcpy])
@@ -419,6 +443,7 @@ AC_CONFIG_FILES([
 	src/package1.0/Makefile
 	src/package1.0/package_test_autoconf.tcl
 	src/pextlib1.0/Makefile
+	src/portlist1.0/Makefile
 	src/port/Makefile
 	src/port1.0/Makefile
 	src/port1.0/port_autoconf.tcl
@@ -431,6 +456,7 @@ AC_CONFIG_FILES([
 	tests/test/library.tcl
 	tests/test/trace/test.tcl
 	vendor/Makefile
+	vendor/signify-osx/autoconf.mk
 ])
 
 AC_CONFIG_FILES([vendor/tclsh], [chmod +x vendor/tclsh])

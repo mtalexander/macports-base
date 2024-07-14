@@ -93,7 +93,7 @@ proc portfetch::mirror_sites {mirrors tag subdir mirrorfile} {
         if {$mirrors ne $global_mirror_site} {
             ui_warn "[format [msgcat::mc "No mirror sites on file for class %s"] $mirrors]"
         }
-        return {}
+        return [list]
     }
 
     set ret [list]
@@ -219,7 +219,6 @@ proc portfetch::checksites {sitelists mirrorfile} {
 
 # sorts fetch_urls in order of ping time
 proc portfetch::sortsites {urls default_listvar} {
-    global $default_listvar
     upvar $urls fetch_urls
     variable urlmap
     set hostregex {[a-zA-Z]+://([a-zA-Z0-9\.\-_]+)}
@@ -247,7 +246,7 @@ proc portfetch::sortsites {urls default_listvar} {
             seteuid 0; setegid 0
         }
 
-        set hosts {}
+        set hosts [list]
         foreach site $urllist {
             if {[string range $site 0 6] eq "file://"} {
                 set pingtimes(localhost) 0

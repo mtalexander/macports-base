@@ -38,6 +38,7 @@
 #include "entry.h"
 #include "entryobj.h"
 #include "file.h"
+#include "snapshotobj.h"
 #include "fileobj.h"
 #include "portgroup.h"
 #include "portgroupobj.h"
@@ -99,7 +100,7 @@ char* unique_name(Tcl_Interp* interp, char* prefix, unsigned int* lower_bound) {
  * use for this yet, so it's not a priority, but it should be there for
  * completeness.
  */
-int parse_flags(Tcl_Interp* interp, int objc, Tcl_Obj* CONST objv[], int* start,
+int parse_flags(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[], int* start,
         option_spec options[], int* flags) {
     int i;
     int index;
@@ -189,6 +190,29 @@ int set_entry(Tcl_Interp* interp, char* name, reg_entry* entry,
                 errPtr)) {
         entry->proc = strdup(name);
         if (!entry->proc) {
+            return 0;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Sets a given name to be an snapshot object.
+ *
+ * @param [in] interp     Tcl interpreter to create the snapshot within
+ * @param [in] name       name to associate the given snapshot with
+ * @param [in] snapshot   snapshot to associate with the given name
+ * @param [out] errPtr    description of error if it couldn't be set
+ * @return                true if success; false if failure
+ * @see set_object
+ */
+int set_snapshot(Tcl_Interp* interp, char* name, reg_snapshot* snapshot,
+        reg_error* errPtr) {
+    if (set_object(interp, name, snapshot, "snapshot", snapshot_obj_cmd, NULL,
+                errPtr)) {
+        snapshot->proc = strdup(name);
+        if (!snapshot->proc) {
             return 0;
         }
         return 1;
@@ -310,6 +334,48 @@ int entry_to_obj(Tcl_Interp* interp, Tcl_Obj** obj, reg_entry* entry,
     return 1;
 }
 
+int snapshot_to_obj(Tcl_Interp* interp, Tcl_Obj** obj, reg_snapshot* snapshot,
+        void* param UNUSED, reg_error* errPtr) {
+    static unsigned int lower_bound = 0;
+    if (snapshot->proc == NULL) {
+        char* name = unique_name(interp, "::registry::snapshot", &lower_bound);
+        if (!name) {
+            return 0;
+        }
+        if (!set_snapshot(interp, name, snapshot, errPtr)) {
+            free(name);
+            return 0;
+        }
+        free(name);
+    }
+    *obj = Tcl_NewStringObj(snapshot->proc, -1);
+    return 1;
+}
+
+// int snapshot_port_to_obj(Tcl_Interp* interp, Tcl_Obj** obj, port* port,
+//         int* lower_bound, reg_error* errPtr) {
+//     if (port->proc == NULL) {
+//         char* name = unique_name(interp, "::registry::snapshot_port", lower_bound);
+//         if (!name) {
+//             return 0;
+//         }
+//         if (!set_snapshot_port(interp, name, snapshot, errPtr)) {
+//             free(name);
+//             return 0;
+//         }
+//         free(name);
+//     }
+//     *obj = Tcl_NewStringObj(snapshot->proc, -1);
+//     return 1;
+// }
+
+// int list_snapshot_ports_to_obj(Tcl_Interp* interp, Tcl_Obj** obj, port** snapshot_ports,
+//     int snapshot_port_count, reg_error* errPtr) {
+//     int lower_bound = 0;
+//     return recast(interp, (cast_function*)snapshot_port_to_obj, &lower_bound, NULL,
+//             (void***)objs, (void**)snapshot_ports, snapshot_port_count, errPtr);
+// }
+
 int file_to_obj(Tcl_Interp* interp, Tcl_Obj** obj, reg_file* file,
         void* param UNUSED, reg_error* errPtr) {
     static unsigned int lower_bound = 0;
@@ -350,6 +416,12 @@ int list_entry_to_obj(Tcl_Interp* interp, Tcl_Obj*** objs,
         reg_entry** entries, int entry_count, reg_error* errPtr) {
     return recast(interp, (cast_function*)entry_to_obj, NULL, NULL,
             (void***)objs, (void**)entries, entry_count, errPtr);
+}
+
+int list_snapshot_to_obj(Tcl_Interp* interp, Tcl_Obj*** objs,
+        reg_snapshot** snapshots, int snapshot_count, reg_error* errPtr) {
+    return recast(interp, (cast_function*)snapshot_to_obj, NULL, NULL,
+            (void***)objs, (void**)snapshots, snapshot_count, errPtr);
 }
 
 int list_file_to_obj(Tcl_Interp* interp, Tcl_Obj*** objs,

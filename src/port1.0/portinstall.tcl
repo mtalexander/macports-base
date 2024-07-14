@@ -72,11 +72,10 @@ proc portinstall::install_start {args} {
 
 proc portinstall::create_archive {location archive.type} {
     global workpath destpath portpath subport version revision portvariants \
-           epoch configure.cxx_stdlib portinstall::actual_cxx_stdlib \
-           portinstall::file_is_binary portinstall::cxx_stdlib_overridden \
-           cxx_stdlib PortInfo installPlist \
+           epoch configure.cxx_stdlib cxx_stdlib PortInfo \
            archive.env archive.cmd archive.pre_args archive.args \
-           archive.post_args archive.dir depends_lib depends_run
+           archive.post_args archive.dir depends_lib depends_run \
+           portarchive_hfscompression
     set archive.env {}
     set archive.cmd {}
     set archive.pre_args {}
@@ -85,6 +84,18 @@ proc portinstall::create_archive {location archive.type} {
     set archive.dir ${destpath}
 
     switch -regex -- ${archive.type} {
+        aar {
+            set aa "aa"
+            if {[catch {set aa [findBinary $aa ${portutil::autoconf::aa_path}]} errmsg] == 0} {
+                ui_debug "Using $aa"
+                set archive.cmd "$aa"
+                set archive.pre_args "archive -v"
+                set archive.args "-o [shellescape ${location}] -d ."
+            } else {
+                ui_debug $errmsg
+                return -code error "No '$aa' was found on this system!"
+            }
+        }
         cp(io|gz) {
             set pax "pax"
             if {[catch {set pax [findBinary $pax ${portutil::autoconf::pax_path}]} errmsg] == 0} {
@@ -96,20 +107,20 @@ proc portinstall::create_archive {location archive.type} {
                     if {[catch {set gzip [findBinary $gzip ${portutil::autoconf::gzip_path}]} errmsg] == 0} {
                         ui_debug "Using $gzip"
                         set archive.args {.}
-                        set archive.post_args "| $gzip -c9 > ${location}"
+                        set archive.post_args "| $gzip -c9 > [shellescape ${location}]"
                     } else {
                         ui_debug $errmsg
                         return -code error "No '$gzip' was found on this system!"
                     }
                 } else {
-                    set archive.args "-f ${location} ."
+                    set archive.args "-f [shellescape ${location}] ."
                 }
             } else {
                 ui_debug $errmsg
                 return -code error "No '$pax' was found on this system!"
             }
         }
-        t(ar|bz|lz|xz|gz) {
+        t(ar|bz|lz|xz|gz|mptar) {
             set tar "tar"
             if {[catch {set tar [findBinary $tar ${portutil::autoconf::tar_path}]} errmsg] == 0} {
                 ui_debug "Using $tar"
@@ -143,13 +154,31 @@ proc portinstall::create_archive {location archive.type} {
                     if {[catch {set gzip [findBinary $gzip $hint]} errmsg] == 0} {
                         ui_debug "Using $gzip"
                         set archive.args {- .}
-                        set archive.post_args "| $gzip -c$level > ${location}"
+                        set archive.post_args "| $gzip -c$level > [shellescape ${location}]"
                     } else {
                         ui_debug $errmsg
                         return -code error "No '$gzip' was found on this system!"
                     }
                 } else {
-                    set archive.args "${location} ."
+                    if {${archive.type} eq "tmptar"} {
+                        # Pass through tar for hardlink detection and HFS compression,
+                        # but extract without saving the tar file.
+                        if {${portarchive_hfscompression} && [getuid] == 0 &&
+                            ![catch {binaryInPath bsdtar}] &&
+                            ![catch {exec bsdtar -x --hfsCompression < /dev/null >& /dev/null}]
+                        } then {
+                            set extract_tar bsdtar
+                            set extract_tar_args {-xvp --hfsCompression -f}
+                        } else {
+                            set extract_tar $tar
+                            set extract_tar_args {-xvpf}
+                        }
+                        set archive.args {- .}
+                        set archive.post_args "| $extract_tar -C $location $extract_tar_args -"
+                        file mkdir $location
+                    } else {
+                        set archive.args "[shellescape ${location}] ."
+                    }
                 }
             } else {
                 ui_debug $errmsg
@@ -162,7 +191,7 @@ proc portinstall::create_archive {location archive.type} {
                 ui_debug "Using $xar"
                 set archive.cmd "$xar"
                 set archive.pre_args {-cvf}
-                set archive.args "${location} ."
+                set archive.args "[shellescape ${location}] ."
             } else {
                 ui_debug $errmsg
                 return -code error "No '$xar' was found on this system!"
@@ -174,7 +203,7 @@ proc portinstall::create_archive {location archive.type} {
                 ui_debug "Using $zip"
                 set archive.cmd "$zip"
                 set archive.pre_args {-ry9}
-                set archive.args "${location} ."
+                set archive.args "[shellescape ${location}] ."
             } else {
                 ui_debug $errmsg
                 return -code error "No '$zip' was found on this system!"
@@ -236,15 +265,15 @@ proc portinstall::create_archive {location archive.type} {
     puts $fd "@portversion ${version}"
     puts $fd "@portrevision ${revision}"
     puts $fd "@archs [get_canonical_archs]"
-    array set ourvariations $PortInfo(active_variants)
-    set vlist [lsort -ascii [array names ourvariations]]
+    set ourvariations $PortInfo(active_variants)
+    set vlist [lsort -ascii [dict keys $ourvariations]]
     foreach v $vlist {
-        if {$ourvariations($v) eq "+"} {
+        if {[dict get $ourvariations $v] eq "+"} {
             puts $fd "@portvariant +${v}"
         }
     }
 
-    foreach key "depends_lib depends_run" {
+    foreach key [list depends_lib depends_run] {
          if {[info exists $key]} {
              foreach depspec [set $key] {
                  set depname [lindex [split $depspec :] end]
@@ -252,19 +281,20 @@ proc portinstall::create_archive {location archive.type} {
                  if {[llength $dep] < 2} {
                      ui_debug "Dependency $depname not found"
                  } else {
-                     array set portinfo [lindex $dep 1]
-                     set depver $portinfo(version)
-                     set deprev $portinfo(revision)
-                     puts $fd "@pkgdep $portinfo(name)-${depver}_${deprev}"
+                     lassign $dep depname dep_portinfo
+                     set depver [dict get $dep_portinfo version]
+                     set deprev [dict get $dep_portinfo revision]
+                     puts $fd "@pkgdep ${depname}-${depver}_${deprev}"
                  }
              }
          }
     }
 
     set have_fileIsBinary [expr {[option os.platform] eq "darwin"}]
-    set binary_files {}
+    set binary_files [list]
+    variable file_is_binary [dict create]
     # also save the contents for our own use later
-    set installPlist {}
+    variable installPlist [list]
     set destpathLen [string length $destpath]
     fs-traverse -depth fullpath [list $destpath] {
         if {[file type $fullpath] eq "directory"} {
@@ -287,7 +317,7 @@ proc portinstall::create_archive {location archive.type} {
                         lappend binary_files $fullpath
                     }
                     puts $fd "@comment binary:$is_binary"
-                    set portinstall::file_is_binary($abspath) $is_binary
+                    dict set file_is_binary $abspath $is_binary
                 }
             }
         } else {
@@ -298,20 +328,20 @@ proc portinstall::create_archive {location archive.type} {
         puts $fd "@ignore"
         puts $fd "$relpath"
     }
-    set portinstall::actual_cxx_stdlib [get_actual_cxx_stdlib $binary_files]
-    puts $fd "@cxx_stdlib ${portinstall::actual_cxx_stdlib}"
-    if {${portinstall::actual_cxx_stdlib} ne "none"} {
-        set portinstall::cxx_stdlib_overridden [expr {${configure.cxx_stdlib} ne $cxx_stdlib}]
+    variable actual_cxx_stdlib [get_actual_cxx_stdlib $binary_files]
+    puts $fd "@cxx_stdlib ${actual_cxx_stdlib}"
+    if {${actual_cxx_stdlib} ne "none"} {
+        variable cxx_stdlib_overridden [expr {${configure.cxx_stdlib} ne $cxx_stdlib}]
     } else {
-        set portinstall::cxx_stdlib_overridden 0
+        variable cxx_stdlib_overridden 0
     }
-    puts $fd "@cxx_stdlib_overridden ${portinstall::cxx_stdlib_overridden}"
+    puts $fd "@cxx_stdlib_overridden ${cxx_stdlib_overridden}"
     close $fd
 
     # Now create the archive
     ui_debug "Creating [file tail $location]"
     command_exec archive
-    ui_debug "Archive [file tail $location] packaged"
+    ui_debug "Port image [file tail $location] created"
 
     # Cleanup all control files when finished
     set control_files [glob -nocomplain -types f [file join $destpath +*]]
@@ -328,8 +358,11 @@ proc portinstall::extract_contents {location type} {
 proc portinstall::install_main {args} {
     global subport version portpath depends_run revision user_options \
     portvariants requested_variants depends_lib PortInfo epoch \
-    os.platform os.major portarchivetype installPlist porturl \
-    portinstall::file_is_binary portinstall::actual_cxx_stdlib portinstall::cxx_stdlib_overridden
+    portarchivetype portimage_mode
+    variable file_is_binary
+    variable actual_cxx_stdlib
+    variable cxx_stdlib_overridden
+    variable installPlist
 
     set oldpwd [pwd]
     if {$oldpwd eq ""} {
@@ -348,21 +381,27 @@ proc portinstall::install_main {args} {
         set location [file join $install_dir [file tail $archive_path]]
         set current_archive_type [string range [file extension $location] 1 end]
         set contents [extract_contents $location $current_archive_type]
-        set installPlist [lindex $contents 0]
-        array set portinstall::file_is_binary [lindex $contents 1]
+        lassign $contents installPlist file_is_binary
         set cxxinfo [extract_archive_metadata $location $current_archive_type cxx_info]
-        set portinstall::actual_cxx_stdlib [lindex $cxxinfo 0]
-        set portinstall::cxx_stdlib_overridden [lindex $cxxinfo 1]
+        lassign $cxxinfo actual_cxx_stdlib cxx_stdlib_overridden
     } else {
-        # throws an error if an unsupported value has been configured
-        archiveTypeIsSupported $portarchivetype
+        if {$portimage_mode eq "directory"} {
+            # Special value to avoid writing archive out to disk, since
+            # only the extracted dir should be kept.
+            set archivetype tmptar
+            set location [file rootname $location]
+        } else {
+            # throws an error if an unsupported value has been configured
+            archiveTypeIsSupported $portarchivetype
+            set archivetype $portarchivetype
+        }
         # create archive from the destroot
-        create_archive $location $portarchivetype
+        create_archive $location $archivetype
     }
 
     # can't do this inside the write transaction due to deadlock issues with _get_dep_port
     set dep_portnames [list]
-    foreach deplist {depends_lib depends_run} {
+    foreach deplist [list depends_lib depends_run] {
         if {[info exists $deplist]} {
             foreach dep [set $deplist] {
                 set dep_portname [_get_dep_port $dep]
@@ -373,59 +412,59 @@ proc portinstall::install_main {args} {
         }
     }
 
-    lappend regref name $subport
-    lappend regref version $version
-    lappend regref revision $revision
-    lappend regref variants $portvariants
-    lappend regref epoch $epoch
+    set regref [dict create]
+    dict set regref name $subport
+    dict set regref version $version
+    dict set regref revision $revision
+    dict set regref variants $portvariants
+    dict set regref epoch $epoch
     if {[info exists user_options(ports_requested)]} {
-        lappend regref requested $user_options(ports_requested)
+        dict set regref requested $user_options(ports_requested)
     } else {
-        lappend regref requested 0
+        dict set regref requested 0
     }
-    lappend regref os_platform ${os.platform}
-    lappend regref os_major ${os.major}
-    lappend regref archs [get_canonical_archs]
-    if {${portinstall::actual_cxx_stdlib} ne ""} {
-        lappend regref cxx_stdlib ${portinstall::actual_cxx_stdlib}
-        lappend regref cxx_stdlib_overridden ${portinstall::cxx_stdlib_overridden}
+    lassign [_get_compatible_platform] os_platform os_major
+    dict set regref os_platform $os_platform
+    dict set regref os_major $os_major
+    dict set regref archs [get_canonical_archs]
+    if {${actual_cxx_stdlib} ne ""} {
+        dict set regref cxx_stdlib ${actual_cxx_stdlib}
+        dict set regref cxx_stdlib_overridden ${cxx_stdlib_overridden}
     } else {
         # no info in the archive
         global configure.cxx_stdlib cxx_stdlib
-        lappend regref cxx_stdlib_overridden [expr {${configure.cxx_stdlib} ne $cxx_stdlib}]
+        dict set regref cxx_stdlib_overridden [expr {${configure.cxx_stdlib} ne $cxx_stdlib}]
     }
     # Trick to have a portable GMT-POSIX epoch-based time.
-    lappend regref date [expr {[clock scan now -gmt true] - [clock scan "1970-1-1 00:00:00" -gmt true]}]
+    dict set regref date [expr {[clock scan now -gmt true] - [clock scan "1970-1-1 00:00:00" -gmt true]}]
     if {[info exists requested_variants]} {
-        lappend regref requested_variants $requested_variants
+        dict set regref requested_variants $requested_variants
     }
 
-    lappend regref depends $dep_portnames
+    dict set regref depends $dep_portnames
 
-    lappend regref location $location
+    dict set regref location $location
 
     if {[info exists installPlist]} {
-        lappend regref files $installPlist
-        lappend regref binary [array get portinstall::file_is_binary]
+        dict set regref files $installPlist
+        dict set regref binary $file_is_binary
     }
 
     # portfile info
-    lappend regref portfile_path [file join $portpath Portfile]
+    dict set regref portfile_path [file join $portpath Portfile]
 
     # portgroup info
     if {[info exists PortInfo(portgroups)]} {
         set regref_pgs [list]
         foreach pg $PortInfo(portgroups) {
-            set pgname [lindex $pg 0]
-            set pgversion [lindex $pg 1]
-            set groupFile [lindex $pg 2]
+            lassign $pg pgname pgversion groupFile
             if {[file isfile $groupFile]} {
                 lappend regref_pgs $pgname $pgversion $groupFile
             } else {
                 ui_debug "install_main: no portgroup ${pgname}-${pgversion}.tcl found"
             }
         }
-        lappend regref portgroups $regref_pgs
+        dict set regref portgroups $regref_pgs
     }
 
     registry_install $regref

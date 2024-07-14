@@ -91,7 +91,7 @@ test fetchfiles {
         filespath license platforms
     env_init
 
-    array set ::portfetch::urlmap {
+    array set portfetch::urlmap {
         db_select http://packages.macports.org/db_select/
     }
     set portarchivefetch::archivefetch_urls {db_select db_select-0.1_3.darwin_14.noarch.tbz2}
@@ -121,7 +121,7 @@ test fetchfiles {
         return "FAIL: cannot fetch archive"
     }
     if {![file exists ${archivefetch.fulldestpath}/db_select-0.1_3.darwin_14.noarch.tbz2]} {
-        return "FAIL: verified archive deleted"
+        return "FAIL: verified archive deleted from ${archivefetch.fulldestpath}"
     }
 
     return "Fetch files successful."
